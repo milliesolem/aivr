@@ -52,6 +52,11 @@ class AuthInfoSerializer extends serializer.JSONSerializer<AuthInfo> {
 The only thing standing between an attacker and the victim's cloud credentials is
 a string visible in the public GitHub repo.
 
+**Additional exposure:** the credential *history* is even less protected. In
+`persistence.ts`, `AuthHistory` (`ak_histories.json`) is serialized with the plain
+`JSONSerializer` — no cipher at all — so past `accessKey`/`accessSecret` pairs are
+written to disk in plaintext (`LocalFile.writeFile`).
+
 ## Exploit chain
 
 ```
