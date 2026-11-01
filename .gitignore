@@ -1,0 +1,5 @@
+# PoC working dirs — keep artifacts out of git
+.deps/
+demo/
+bomb.tgz
+*.tgz
