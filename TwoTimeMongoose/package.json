@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "mongoose-field-encryption": "^7.0.1"
+  }
+}
