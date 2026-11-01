@@ -5,3 +5,5 @@ bomb.tgz
 *.tgz
 node_modules/
 server/
+__pycache__/
+*.pyc
