@@ -3,3 +3,4 @@
 demo/
 bomb.tgz
 *.tgz
+node_modules/
