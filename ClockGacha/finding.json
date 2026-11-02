@@ -1,0 +1,50 @@
+{
+  "id": "ClockGacha",
+  "verdict": "confirmed",
+  "repo": "v03413/bepusdt",
+  "entry_point": {
+    "file": "app/model/conf.go",
+    "line": 148,
+    "code": "var hash = utils.StrSha256(utils.Md5String(time.Now().String()))"
+  },
+  "critical_operation": {
+    "file": "app/cmd/reset.go",
+    "line": 34,
+    "code": "hash := utils.Md5String(time.Now().String())"
+  },
+  "trace": [
+    {
+      "file": "app/model/conf.go",
+      "line": "150-152",
+      "code": "token = ToUpper(Md5String(hash[18:28])); username = hash[10:20]; password = hash[20:30]"
+    },
+    {
+      "file": "app/cmd/reset.go",
+      "line": "36-37",
+      "code": "username := hash[8:16]; password := hash[0:8]  // 8 hex chars = 32 bits"
+    },
+    {
+      "file": "app/handler/admin/conf.go",
+      "line": "181",
+      "code": "model.SetK(model.ApiAuthToken, strings.ToUpper(utils.Md5String(utils.StrSha256(time.Now().String()))))"
+    },
+    {
+      "file": "app/handler/epusdt/epusdt.go",
+      "line": "100",
+      "code": "if utils.EpusdtSign(m, model.AuthToken()) != sign { ctx.String(200, \"fail\"); return }"
+    }
+  ],
+  "preconditions": [
+    "attacker can determine or brute-force the credential-generation timestamp (wall-clock nanosecond + monotonic offset, ~50-60 bits; 32-bit password after 'reset')"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:H/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "main @ 78db081b3527c7c6a4763e853255dd9141b3bcae",
+    "fixed_version": "",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "RESULT: CONFIRMED — BEpusdt derives the admin password, secure entry and payment API token from time.Now().String() (CWE-338); the fixed crypto/rand derivation is not a function of the clock."
+  }
+}
