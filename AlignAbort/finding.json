@@ -1,0 +1,45 @@
+{
+  "id": "AlignAbort",
+  "verdict": "confirmed",
+  "repo": "microsoft/onnxruntime",
+  "entry_point": {
+    "file": "onnxruntime/core/providers/cpu/object_detection/roialign.cc",
+    "line": 267,
+    "code": "Status RoiAlign<T>::Compute(OpKernelContext* context) const {"
+  },
+  "critical_operation": {
+    "file": "onnxruntime/core/providers/cpu/object_detection/roialign.cc",
+    "line": 271,
+    "code": "auto num_channels = x_dims[1];"
+  },
+  "trace": [
+    {
+      "file": "onnxruntime/core/providers/cpu/object_detection/roialign.cc",
+      "line": "271-275",
+      "code": "auto num_channels = x_dims[1]; auto num_rois = batch_indices_dims[0]; auto num_roi_cols = rois_dims[1]; ... auto status = CheckROIAlignValidInput(X_ptr, rois_ptr, batch_indices_ptr);  // validation AFTER indexing"
+    },
+    {
+      "file": "onnxruntime/core/providers/cpu/object_detection/roialign.cc",
+      "line": "292-293",
+      "code": "RoiAlignForward<T>(Y.Shape(), X_ptr->Data<T>(), this->spatial_scale_, x_dims[2], x_dims[3], ...)"
+    },
+    {
+      "file": "onnxruntime/core/providers/cpu/object_detection/roialign.h",
+      "line": "56",
+      "code": "const int64_t batch_size = X_ptr->Shape()[0];  // no rank check on X"
+    }
+  ],
+  "preconditions": [
+    "attacker supplies the ONNX model (graph inputs typed but shapeless)",
+    "victim runs the model on onnxruntime CPU EP with rank-mismatched X/rois/batch_indices"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "vulnerable_version": "1.31.1 (pip latest) and earlier; main @ 657cc524ed 2026-11-02",
+    "fixed_version": "none at time of writing (0-day; sibling kernels fixed by 9265e05ae9 / PR #33517, RoiAlign missed)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "control case exit 0; triggers A (X rank 1), B (X rank 2), C (batch_indices rank 0), D (rois rank 1) each SIGABRT (-6) with 'terminate called without an active exception' — every run across fresh subprocesses crashed"
+  }
+}
