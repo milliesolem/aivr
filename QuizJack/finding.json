@@ -1,0 +1,24 @@
+{
+  "id": "QuizJack",
+  "verdict": "confirmed",
+  "repo": "mawoka-myblock/ClassQuiz",
+  "commit": "49dca85",
+  "entry_point": {"file": "classquiz/socket_server/__init__.py", "line": 144, "code": "captcha_res = check_captcha(data.captcha)"},
+  "critical_operation": {"file": "classquiz/socket_server/helpers.py", "line": 19, "code": "async def check_captcha(captcha_data: str) -> bool:"},
+  "trace": [
+    {"file": "classquiz/routers/quiz.py", "line": "98", "code": "game_pin = randint(100000, 999999)"},
+    {"file": "classquiz/routers/quiz.py", "line": "162-168", "code": "GET /join/{game_pin} -> game_id oracle, no auth, no rate limit"},
+    {"file": "classquiz/socket_server/__init__.py", "line": "143-146", "code": "if game_data.captcha_enabled: captcha_res = check_captcha(...); if not captcha_res: return"}
+  ],
+  "preconditions": ["a live (unstarted) game exists — teacher created a PIN (5h TTL)"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "master@49dca85 (deployed via ghcr :master image); introduced f3abe4d2 2025-10-25",
+    "fixed_version": "none upstream yet (open as of 49dca85, 2026-10-24)",
+    "proof_commands": ["python3 poc.py"],
+    "observed_result": "join accepted: True with INVALID captcha token (coroutine never awaited); fixed variant rejects; oracle + MT19937 PIN confirmed against verbatim source"
+  }
+}
