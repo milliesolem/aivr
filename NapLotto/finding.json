@@ -1,0 +1,43 @@
+{
+  "id": "NapLotto",
+  "verdict": "confirmed",
+  "repo": "NapNeko/NapCatQQ",
+  "commit": "98d781d19815d1625b24d717ce280ecf0a4f6d0c",
+  "entry_point": {
+    "file": "packages/napcat-onebot/network/http-server.ts",
+    "line": 273,
+    "code": "const real_echo = payload_echo ?? Math.random().toString(36).substring(2, 15);"
+  },
+  "critical_operation": {
+    "file": "packages/napcat-webui-backend/src/helper/SignToken.ts",
+    "line": 5,
+    "code": "private static readonly secretKey = process.env['NAPCAT_WEBUI_JWT_SECRET_KEY'] || Math.random().toString(36).slice(2);"
+  },
+  "trace": [
+    {
+      "file": "packages/napcat-webui-backend/index.ts",
+      "line": "29",
+      "code": "import { NapCatOneBot11Adapter } from '@/napcat-onebot/index';"
+    },
+    {
+      "file": "packages/napcat-onebot/network/http-server.ts",
+      "line": "273",
+      "code": "const real_echo = payload_echo ?? Math.random().toString(36).substring(2, 15);"
+    },
+    {
+      "file": "packages/napcat-webui-backend/src/helper/SignToken.ts",
+      "line": "24",
+      "code": "const hmac = crypto.createHmac('sha256', AuthHelper.secretKey).update(jsonString, 'utf8').digest('hex');"
+    }
+  ],
+  "preconditions": ["LAN access to the OneBot HTTP API (echo oracle)", "one sniffed WebUI credential (HashEncoded + Hmac) from an admin session", "default install without NAPCAT_WEBUI_JWT_SECRET_KEY set"],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "vulnerable_version": "main @ 98d781d19815d1625b24d717ce280ecf0a4f6d0c (unfixed)",
+    "fixed_version": "none (unfixed as of 2026-11-03)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "5 OneBot echo responses recover the V8 xorshift128+ state (z3); the HMAC oracle selects the exact secretKey string (matches demo /key); a forged credential with CreatedTime=now + sniffed HashEncoded is ACCEPTED (200) by the verbatim validateCredentialWithinOneHour() — the 1-hour expiry and revocation of the sniffed admin credential are defeated. Exit 0."
+  }
+}
