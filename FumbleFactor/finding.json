@@ -1,0 +1,53 @@
+{
+  "id": "FumbleFactor",
+  "repo": "mkhorasani/Streamlit-Authenticator",
+  "commit": "078b8f634e1702b45ddf722a4feb37b45a94f65c",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "streamlit_authenticator/controllers/authentication_controller.py",
+    "line": 104,
+    "code": "if code == self.encryptor.decrypt(st.session_state[f'2FA_code_{widget}']):"
+  },
+  "critical_operation": {
+    "file": "streamlit_authenticator/models/authentication_model.py",
+    "line": 235,
+    "code": "two_factor_auth_code = Helpers.generate_random_string(length=4, letters=False,"
+  },
+  "trace": [
+    {
+      "file": "streamlit_authenticator/models/authentication_model.py",
+      "line": "235-238",
+      "code": "two_factor_auth_code = Helpers.generate_random_string(length=4, letters=False, punctuation=False); st.session_state[f'2FA_code_{widget}'] = self.encryptor.encrypt(two_factor_auth_code)"
+    },
+    {
+      "file": "streamlit_authenticator/utilities/helpers.py",
+      "line": "16",
+      "code": "import random"
+    },
+    {
+      "file": "streamlit_authenticator/utilities/helpers.py",
+      "line": "100",
+      "code": "return ''.join(random.choice(letters) for i in range(length)).replace(' ','')"
+    },
+    {
+      "file": "streamlit_authenticator/controllers/authentication_controller.py",
+      "line": "104-111",
+      "code": "if code == self.encryptor.decrypt(...): ... return True; st.session_state[f'2FA_check_{widget}'] = False; return False  # no lockout/expiry"
+    }
+  ],
+  "preconditions": [
+    "attacker knows the victim's account password",
+    "victim account has email two-factor authentication enabled",
+    "app instantiated with two_factor_auth=True"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "<= 0.4.3 (master @ 078b8f6)",
+    "fixed_version": "unfixed as of 2026-11-03",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "vulnerable generate_random_string(length=4, letters=False, punctuation=False) yields a 10^4=10,000-code space using the stdlib 'random' (Mersenne Twister); check_two_factor_auth_code applies no lockout/expiry so a brute-force loop recovers the code in <= 10,000 guesses. Fixed version (secrets.choice + 6 digits + 5-attempt lockout) blocks the same attack."
+  }
+}
