@@ -30,8 +30,12 @@ const crypto = require('crypto');
 const secretKey = process.env['NAPCAT_WEBUI_JWT_SECRET_KEY'] || Math.random().toString(36).slice(2);
 
 // [VERBATIM] SignToken.ts — signCredential / checkCredential / generatePasswordHash /
-// validateCredentialWithinOneHour, transcribed exactly (class -> plain functions)
+// validateCredentialWithinOneHour / isCredentialRevoked, transcribed exactly
+// (class -> plain functions; the in-memory `store` is a minimal stand-in for
+// napcat-common's store with the same 3600s expiry semantics).
 const MAX_CREDENTIAL_VALID_SECONDS = 3600;
+
+const store = new Map();               // napcat-common store stand-in
 
 function signCredential(hash) {
   const innerJson = {
@@ -60,9 +64,22 @@ function generatePasswordHash(password) {
   return crypto.createHash('sha256').update(password + '.napcat').digest().toString('hex');
 }
 
+function isCredentialRevoked(credentialJson) {
+  const jsonString = JSON.stringify(credentialJson.Data);
+  const hmac = crypto.createHmac('sha256', secretKey).update(jsonString, 'utf8').digest('hex');
+  return store.has(`revoked:${hmac}`);
+}
+
+function revokeCredential(credentialJson) {
+  const jsonString = JSON.stringify(credentialJson.Data);
+  const hmac = crypto.createHmac('sha256', secretKey).update(jsonString, 'utf8').digest('hex');
+  store.set(`revoked:${hmac}`, true, 3600);
+}
+
 function validateCredentialWithinOneHour(token, credentialJson) {
   const isValid = checkCredential(credentialJson);
   if (!isValid) return false;
+  if (isCredentialRevoked(credentialJson)) return false;
   const currentTimeSeconds = Math.floor(Date.now() / 1000);
   const createdTimeSeconds = Math.floor(Number(credentialJson.Data.CreatedTime));
   const timeDifferenceSeconds = currentTimeSeconds - createdTimeSeconds;
@@ -80,7 +97,7 @@ function onebotEcho() {
   return Math.random().toString(36).substring(2, 15);
 }
 
-const PORT = 19277;
+const PORT = parseInt(process.env.NAPLOTTO_PORT || '19277', 10);
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   if (req.method === 'GET' && url.pathname === '/echo') {

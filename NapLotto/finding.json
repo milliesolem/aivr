@@ -30,14 +30,14 @@
       "code": "const hmac = crypto.createHmac('sha256', AuthHelper.secretKey).update(jsonString, 'utf8').digest('hex');"
     }
   ],
-  "preconditions": ["LAN access to the OneBot HTTP API (echo oracle)", "one sniffed WebUI credential (HashEncoded + Hmac) from an admin session", "default install without NAPCAT_WEBUI_JWT_SECRET_KEY set"],
-  "severity_claim": "high",
-  "cvss_vector": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:N",
+  "preconditions": ["operator-enabled, attacker-reachable OneBot HTTP server (disabled by default: httpServers=[], host=127.0.0.1)", "one captured admin credential (HashEncoded + Hmac) from an admin session", "default install without NAPCAT_WEBUI_JWT_SECRET_KEY set", "observation window where the 5 echo draws are consecutive (idle bot)"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:A/AC:H/PR:N/UI:N/S:U/C:L/I:H/A:N",
   "reachable_if_trusted_input": true,
   "evidence": {
     "vulnerable_version": "main @ 98d781d19815d1625b24d717ce280ecf0a4f6d0c (unfixed)",
     "fixed_version": "none (unfixed as of 2026-11-03)",
     "proof_commands": ["bash run.sh"],
-    "observed_result": "5 OneBot echo responses recover the V8 xorshift128+ state (z3); the HMAC oracle selects the exact secretKey string (matches demo /key); a forged credential with CreatedTime=now + sniffed HashEncoded is ACCEPTED (200) by the verbatim validateCredentialWithinOneHour() — the 1-hour expiry and revocation of the sniffed admin credential are defeated. Exit 0."
+    "observed_result": "5 OneBot echo responses recover the V8 xorshift128+ state (z3, +-1-ulp tolerance for the radix-36 emitter quirk); the HMAC oracle selects the exact secretKey string (matches demo /key); a forged credential with CreatedTime=now + sniffed HashEncoded is ACCEPTED (200) by the transcribed validateCredentialWithinOneHour() (incl. isCredentialRevoked) — the 1-hour expiry and revocation of the sniffed admin credential are defeated (bounded by process restart / token change). Exit 0."
   }
 }
