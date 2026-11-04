@@ -1,0 +1,33 @@
+{
+  "id": "UltraPickle",
+  "repo": "ultralytics/ultralytics",
+  "commit": "",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "ultralytics/utils/patches.py",
+    "line": 197,
+    "code": "def torch_load(*args, **kwargs):"
+  },
+  "critical_operation": {
+    "file": "ultralytics/utils/patches.py",
+    "line": 217,
+    "code": "kwargs[\"weights_only\"] = False"
+  },
+  "trace": [
+    {"file": "ultralytics/utils/patches.py", "line": "197-218", "code": "torch_load wrapper forces weights_only=False (overriding PyTorch 2.6+ safe default) -> torch.load(..., weights_only=False)"},
+    {"file": "ultralytics/nn/tasks.py", "line": "2023", "code": "ckpt, weight = torch_safe_load(weight)  # default safe_only=None -> SAFE_LOAD (flag off) -> weights_only=False"}
+  ],
+  "preconditions": [
+    "victim loads a YOLO .pt checkpoint from an untrusted source (shared model, community hub, typosquatted URL)"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "main (and 8.4.x; the 8.4.67 ULTRALYTICS_SAFE_LOAD fix is opt-in)",
+    "fixed_version": "none (no fixed version per NVD/ZDI/GHSA)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "torch.load(weights_only=False) [default] -> RCE CONFIRMED: uid=1000(millie) gid=1000(millie) groups=1000(millie),27(sudo); torch.load(weights_only=True) [opt-in] -> BLOCKED: UnpicklingError weights only load failed"
+  }
+}
