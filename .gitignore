@@ -11,3 +11,7 @@ build/
 *.class
 lib/
 target/
+rsa_crash_vuln
+rsa_crash_fixed
+xmss_crash_vuln
+xmss_crash_fixed
