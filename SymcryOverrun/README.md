@@ -52,6 +52,33 @@ the PKCS#1 **signature** padding function ("Simple check to avoid funky
 behavior if cbHash is close to SIZE_MAX"), but left the **encryption** padding
 siblings unfixed.
 
+### Reachability on Windows (research findings, 2026-11-04)
+
+- **CNG/BCrypt layer:** public symbols prove the path
+  `BCryptEncrypt -> MSCryptRsaEncrypt -> SymCryptRsaPkcs1Encrypt /
+  SymCryptRsaOaepEncrypt` in `bcryptprimitives.dll` (vallejo.cc 2018
+  derandomization writeup + public PDB dumps). MSDN documents **no**
+  provider-side `cbInput`-vs-key-size validation, and no public writeup shows
+  whether `MSCryptRsaEncrypt` checks before forwarding. However:
+  - `BCryptEncrypt`'s `cbInput` is **ULONG (32-bit)** — so on x64 the
+    documented API **cannot express** the wrap range at all. Ordinary x64 BCrypt
+    consumers are not a delivery path regardless of wrapper validation.
+  - **32-bit processes (x86 / WOW64)** CAN pass `cbInput ∈ [0xFFFFFFF5,
+    0xFFFFFFFF]`, i.e. the wrap range of a 32-bit SIZE_T — the one case where
+    the documented API could reach the bug; whether the wrapper rejects it is
+    untested publicly (ordinary oversized inputs empirically return
+    STATUS_INVALID_PARAMETER, which hints at a wrapper check for *normal*
+    oversize — but the wrap range is a different code path).
+  - **Direct SymCrypt embedders** (products that compile SymCrypt in, e.g.
+    Azure/Edge/Defender-style consumers) call these APIs with their own
+    SIZE_T lengths and are not limited by the ULONG signature at all.
+- **Remote callers:** no remotely-exposed Windows component forwards an
+  attacker-controlled length into RSA-OAEP/PKCS1 *encryption*: DPAPI BackupKey
+  RPC (MS-BKRP), EFS (MS-EFSR), AD CS (MS-WCCE), and RDP Standard Security
+  (MS-RDPBCGR) all encrypt locally computed, fixed-size structures. The
+  practical trigger remains a local caller with a length-confusion bug —
+  no demonstrated remote path.
+
 Honest caveats (critic-pass confirmed): (1) the caller must pass a pathological
 length — a careful caller that pre-validates lengths is not affected; (2) the
 trigger length is `~2^64` (a wrapped 64-bit field), so in practice it arrives
