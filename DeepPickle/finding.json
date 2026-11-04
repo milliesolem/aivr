@@ -1,0 +1,33 @@
+{
+  "id": "DeepPickle",
+  "repo": "google-deepmind/ai-foundations",
+  "commit": "5338de78c28ecd87548a3b003038b095abf5cb93",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "ai_foundations/tokenization/bpe_tokenizer.py",
+    "line": 298,
+    "code": "def from_url(cls, url: str) -> \"BPEWordTokenizer\":"
+  },
+  "critical_operation": {
+    "file": "ai_foundations/tokenization/bpe_tokenizer.py",
+    "line": 309,
+    "code": "tokenizer = pickle.load(response)"
+  },
+  "trace": [
+    {"file": "ai_foundations/tokenization/bpe_tokenizer.py", "line": "308", "code": "with request.urlopen(url) as response:"},
+    {"file": "ai_foundations/tokenization/bpe_tokenizer.py", "line": "309", "code": "tokenizer = pickle.load(response)"}
+  ],
+  "preconditions": [
+    "victim loads a tokenizer from an attacker-controlled / untrusted URL via BPEWordTokenizer.from_url"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "main@5338de78c28ecd87548a3b003038b095abf5cb93",
+    "fixed_version": "none (unfixed as of 2026-11-04)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "RCE CONFIRMED - arbitrary command executed as the loader process: uid=1000(millie) gid=1000(millie) groups=1000(millie),27(sudo)"
+  }
+}
