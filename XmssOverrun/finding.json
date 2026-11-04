@@ -1,0 +1,37 @@
+{
+  "id": "XmssOverrun",
+  "repo": "microsoft/SymCrypt",
+  "commit": "286762b7730e2b780678f5ab11fef2b1bad639e0",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/xmss.c",
+    "line": 2088,
+    "code": "SymCryptXmssRandomizedHash(&pKey->params, Idx, Randomness, pKey->Root, pbMessage, cbMessage, RandomizedHash);"
+  },
+  "critical_operation": {
+    "file": "lib/xmss.c",
+    "line": 1514,
+    "code": "SYMCRYPT_STORE_MSBFIRST64(&idxBuf[pParams->cbHashOutput - sizeof(Idx)], Idx);"
+  },
+  "trace": [
+    {"file": "lib/xmss.c", "line": "393-396", "code": "SymCryptXmssSetParams validates cbHashOutput only as: == 0 || > pHash->resultSize || > SYMCRYPT_HASH_MAX_RESULT_SIZE — so n = 1..7 is ACCEPTED (SHA-256 resultSize=32, n=4 passes)"},
+    {"file": "lib/xmss.c", "line": "2088", "code": "SymCryptXmssSign calls SymCryptXmssRandomizedHash(&pKey->params, ...)"},
+    {"file": "lib/xmss.c", "line": "1511", "code": "BYTE idxBuf[SYMCRYPT_HASH_MAX_RESULT_SIZE];  // 64-byte stack buffer"},
+    {"file": "lib/xmss.c", "line": "1514", "code": "SYMCRYPT_STORE_MSBFIRST64(&idxBuf[cbHashOutput - sizeof(Idx)], Idx) — with n=4 the index is -4: the 8-byte big-endian Idx store lands 4 bytes BELOW idxBuf"},
+    {"file": "lib/xmss.c", "line": "1517-1521", "code": "critic-verified: the below-buffer 4 bytes are the spilled pbMsg pointer slot — the Idx store zeroes its high 4 bytes (the sign index's upper bytes are 0), truncating the 64-bit pointer to 32 bits; the subsequent SymCryptHashAppend on the truncated pointer crashes (SIGSEGV observed)"}
+  ],
+  "preconditions": [
+    "A caller creates a custom XMSS parameter set with cbHashOutput (n) in 1..7 via the public SymCryptXmssSetParams API and signs a message",
+    "Custom parameter sets are an explicitly supported feature; no attacker data is required for the memory corruption itself (local API misuse triggers it; a remote attacker needs an app exposing custom XMSS config — none known)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "2b930b400e39f541a0b0245796382d79d8c4db72 (class fix, cbPrefix bounds for custom XMSS parameter sets — the cbHashOutput gap was left unfixed)",
+    "vulnerable_version": "HEAD 286762b (v103.13.0); the unchecked index dates to the XMSS implementation (15d0779)",
+    "fixed_version": "none (unfixed at HEAD)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "REAL-CODE differential (SymCrypt compiled from source with zig cc): VULNERABLE build -> SymCryptXmssSetParams(n=4,h=10,w=4) returns SYMCRYPT_NO_ERROR, keygen succeeds, SymCryptXmssSign SIGSEGVs (rc=139) — the Idx store zeroes the high half of the spilled pbMsg pointer (critic disassembly-verified) and the truncated-pointer hash append crashes. FIXED build (cbHashOutput < sizeof(UINT64) rejected) -> SymCryptXmssSetParams returns SYMCRYPT_INVALID_ARGUMENT (0x800e), no crash. Same caller code; only the parameter validation differs. DoS-class (C:N/I:N), hence medium severity per the critic pass."
+  }
+}

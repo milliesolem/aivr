@@ -1,0 +1,38 @@
+{
+  "id": "SymcryOverrun",
+  "repo": "microsoft/SymCrypt",
+  "commit": "286762b7730e2b780678f5ab11fef2b1bad639e0",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/rsa_enc.c",
+    "line": 676,
+    "code": "    scError = SymCryptRsaPkcs1ApplyEncryptionPadding("
+  },
+  "critical_operation": {
+    "file": "lib/rsa_padding.c",
+    "line": 197,
+    "code": "if( cbPkcs1Format < (cbPlaintext + 11) )"
+  },
+  "trace": [
+    {"file": "lib/rsa_enc.c", "line": "629-676", "code": "SymCryptRsaPkcs1Encrypt() allocates a modulus-sized scratch (cbTmp, e.g. 256 B) and calls SymCryptRsaPkcs1ApplyEncryptionPadding(pbSrc, cbSrc, pbTmp, cbTmp) with cbSrc UNVALIDATED (no cbSrc < cbTmp-11 check anywhere in the chain)"},
+    {"file": "lib/rsa_padding.c", "line": "197", "code": "guard: if (cbPkcs1Format < (cbPlaintext + 11)) — SIZE_T addition WRAPS for cbPlaintext > SIZE_MAX-10, so the check passes"},
+    {"file": "lib/rsa_padding.c", "line": "203", "code": "cbPS = cbPkcs1Format - (cbPlaintext + 3) — underflows to a huge value (e.g. 259 for cbPlaintext = SIZE_MAX-5)"},
+    {"file": "lib/rsa_padding.c", "line": "208", "code": "SymCryptCallbackRandom(&pbPkcs1Format[2], cbPS) — writes past the modulus-sized heap buffer (ASan: heap-buffer-overflow)"},
+    {"file": "lib/rsa_padding.c", "line": "229", "code": "memcpy(pbPkcs1Format + 3 + cbPS, pbPlaintext, cbPlaintext) — ~2^64-byte OOB read+write"}
+  ],
+  "preconditions": [
+    "The caller passes a cbSrc value in (SIZE_MAX-10, SIZE_MAX] to SymCryptRsaPkcs1Encrypt (or SymCryptRsaOaepEncrypt) — e.g. a 64-bit length field from an untrusted packet, or a length-confusion/sign-extension bug in a language binding",
+    "No authentication, no key access, no special privilege — only an RSA encryption call with a pathological length",
+    "NOTE (critic-pass): no known Windows service forwards untrusted lengths into these APIs today; the bug requires a caller-side length confusion, and the overflow bytes are random/uncontrolled (DoS-class, not a controlled write primitive)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "bf421d1966e8e5da51f1dc75dfcab011cbaf3532 (class fix, PKCS#1 *signature* padding only — the encryption-padding siblings were left unfixed)",
+    "vulnerable_version": "HEAD 286762b (v103.13.0); present since the padding code predates 2025",
+    "fixed_version": "none for the encryption paths (unfixed at HEAD)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "REAL-CODE differential (SymCrypt compiled from source with zig cc): VULNERABLE build -> SymCryptRsaPkcs1Encrypt(key, data, SIZE_MAX-5) aborts with heap corruption ('free(): invalid next size', rc=134) — the wrapped guard lets the random fill write 259 bytes at offset 2 of the 256-byte modulus-sized chunk (5 bytes past the end, corrupting the next chunk's metadata); direct SymCryptRsaPkcs1ApplyEncryptionPadding(SIZE_MAX-5, 256) segfaults (rc=139). FIXED build (bf421d1-style overflow-safe guard only, everything else identical) -> same calls return SYMCRYPT_INVALID_ARGUMENT (0x800e) cleanly (rc=0). Critic note: the trailing memcpy of ~2^64 bytes is platform-defined (glibc wraps pointer arithmetic and exits the copy loop); the deterministic observable is the small random-byte overflow corrupting heap metadata — DoS-class (A:H), hence the medium severity."
+  }
+}
