@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Product | [google-deepmind/ai-foundations](https://github.com/google-deepmind/ai-foundations) (Google DeepMind AI research library) |
+| Product | [google-deepmind/ai-foundations](https://github.com/google-deepmind/ai-foundations) (Google DeepMind AI-research curriculum — self-described "not an official Google product", educational) |
 | Component | `ai_foundations/tokenization/bpe_tokenizer.py` — `BPEWordTokenizer.from_url()` |
 | Affected | `main` @ `5338de78c28ecd87548a3b003038b095abf5cb93` (and any prior `from_url`) |
 | CVSS 3.1 | **7.8 HIGH** `CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H` |
@@ -89,4 +89,9 @@ and calls the real `BPEWordTokenizer.from_url()` on it. Expected output ends wit
   organization only ever loads tokenizers from a fixed, trusted origin, the risk
   is latent rather than immediately exploitable. The vulnerability is the library
   *silently* deserializing untrusted bytes with no guard, warning, or safe
-  alternative — not a hardening gap in a downstream app.
+  alternative — not a hardening gap in a downstream app. Note also that
+  `ai-foundations` is an **educational** research curriculum (the repo itself
+  states it is "not an official Google product" and "intended for educational
+  purposes only"), so real-world *deployment* is thinner than a production
+  library like Stanza/MLflow — the flaw is genuine and the class is the same, but
+  treat deployment confidence accordingly.
