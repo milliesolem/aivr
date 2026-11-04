@@ -1,0 +1,45 @@
+{
+  "id": "LeroPickle",
+  "repo": "huggingface/lerobot",
+  "commit": "6e3b67c5f0b77c93a5179d88d7c1d6a5f7ff7b27",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/lerobot/rl/learner_service.py",
+    "line": 120,
+    "code": "def SendInteractions(self, request_iterator, _context: \"grpc.ServicerContext\"):  # noqa: N802"
+  },
+  "critical_operation": {
+    "file": "src/lerobot/transport/utils.py",
+    "line": 139,
+    "code": "obj = pickle.load(bytes_buffer)  # nosec B301: Safe usage of pickle.load"
+  },
+  "trace": [
+    {
+      "file": "src/lerobot/rl/learner_service.py",
+      "line": "121-128",
+      "code": "# TODO: authorize the request   ... receive_bytes_in_chunks(request_iterator, self.interaction_message_queue, self.shutdown_event, ...)"
+    },
+    {
+      "file": "src/lerobot/transport/utils.py",
+      "line": "103",
+      "code": "queue.put(bytes_buffer.getvalue())"
+    },
+    {
+      "file": "src/lerobot/rl/learner.py",
+      "line": "950",
+      "code": "message = bytes_to_python_object(message)"
+    }
+  ],
+  "preconditions": [
+    "learner gRPC port reachable by the attacker (default binds 127.0.0.1 = local-only; the distributed-training deployment sets learner_host to a LAN interface = adjacent-network)",
+    "no authentication on the LearnerService gRPC methods (explicit 'TODO: authorize the request')"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "vulnerable_version": "main @ 6e3b67c5f0b77c93a5179d88d7c1d6a5f7ff7b27 (2026-11-04)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "SendInteractions gRPC stream carrying a __reduce__ pickle -> pickle.load executes os.system on the learner: marker file /tmp/leropickle_PWNED contains 'LeroPickle_RCE_<uid>'; restricted-unpickler fix blocks the same payload."
+  }
+}
