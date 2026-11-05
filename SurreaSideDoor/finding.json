@@ -1,0 +1,47 @@
+{
+  "id": "SurreaSideDoor",
+  "verdict": "confirmed",
+  "repo": "surrealdb/surrealdb",
+  "commit": "238bfeb11f5725bebed370167656748df8067595",
+  "entry_point": {
+    "file": "surrealdb/core/src/exec/parts/method.rs",
+    "line": 61,
+    "code": "let Some(func) = self.descriptor.resolve(&value) else {"
+  },
+  "critical_operation": {
+    "file": "surrealdb/core/src/exec/parts/method.rs",
+    "line": 88,
+    "code": "func.invoke(func_args)"
+  },
+  "trace": [
+    {
+      "file": "surrealdb/core/src/exec/parts/method.rs",
+      "line": "61-88",
+      "code": "MethodPart::evaluate resolves the method descriptor and then goes straight to func.invoke / func.invoke_async — no check_allowed_function() on the resolved function name (unlike expr/function.rs:90, physical_expr/function/builtin.rs:46 and fnc/mod.rs:671)"
+    },
+    {
+      "file": "surrealdb/core/src/exec/parts/method.rs",
+      "line": "64-71",
+      "code": "fixed in 3.3.1: after descriptor.resolve(), insert ctx.check_allowed_function(func.name())?;"
+    },
+    {
+      "file": "surrealdb/core/src/exec/planner/idiom.rs",
+      "line": "295",
+      "code": "planning-time registry.get_method() resolves the descriptor with the same unchecked path"
+    }
+  ],
+  "preconditions": [
+    "operator hardens the deployment with --deny-funcs (or SURREAL_CAPS_DENY_FUNC) to forbid a function family such as array::*, file::*, http::*",
+    "an authenticated (or guest, when --allow-guests is set) subject that can submit a SurrealQL query over HTTP/WS/RPC"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "fc6ec74e11df",
+    "vulnerable_version": "3.3.0",
+    "fixed_version": "3.3.1",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "v3.3.0 with --deny-funcs array::map: normal form 'RETURN array::map([1,2], |$x| $x*2)' -> ERR 'Function array::map is not allowed to be executed'; method form 'RETURN [1,2].map(|$x| $x*2)' -> {\"result\":[2,4],\"status\":\"OK\"} (BYPASS). v3.3.1: the same method form -> ERR NotAllowed (deny enforced). The fix adds ctx.check_allowed_function(func.name())?; after descriptor.resolve() in MethodPart::evaluate."
+  }
+}
