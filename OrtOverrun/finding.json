@@ -1,0 +1,37 @@
+{
+  "id": "OrtOverrun",
+  "repo": "microsoft/onnxruntime",
+  "commit": "9ace214997413a47d31cf0e1b0d0647d7ee1c8e6",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "onnxruntime/core/providers/cpu/nn/roi_pool.cc",
+    "line": 20,
+    "code": "int batch_size = static_cast<int>(X->Shape()[0]);"
+  },
+  "critical_operation": {
+    "file": "onnxruntime/core/providers/cpu/nn/roi_pool.cc",
+    "line": 23,
+    "code": "int width = static_cast<int>(X->Shape()[3]);"
+  },
+  "trace": [
+    {
+      "file": "onnxruntime/core/providers/cpu/nn/roi_pool.cc",
+      "line": "17-27",
+      "code": "const auto* X = context->Input<Tensor>(0);\nconst auto* R = context->Input<Tensor>(1);\nif (X == nullptr || R == nullptr) return ...;\nint batch_size = X->Shape()[0]; ... int width = X->Shape()[3];\nint num_rois = R->Shape()[0];\nORT_ENFORCE(R->Shape()[1] == 5);  // no rank check precedes these TensorShape index reads"
+    }
+  ],
+  "preconditions": [
+    "a model whose MaxRoiPool inputs are declared with type only (no shape), so shape inference cannot reject rank-mismatched runtime tensors",
+    "an attacker who can feed a rank-mismatched tensor to that node (inference service with attacker-influenced input shape)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "1.31.1 (HEAD 9ace214)",
+    "fixed_version": "unfixed",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "onnxruntime 1.31.1 MaxRoiPool (opset 1): control (rank-4 X, rank-2 rois) runs clean; scalar X (rank 0), rank-2 X, and rank-1 rois all die with SIGABRT (-6, 'terminate called without an active exception') from the unvalidated TensorShape indexing in roi_pool.cc:20-27. Unfixed at HEAD."
+  }
+}
