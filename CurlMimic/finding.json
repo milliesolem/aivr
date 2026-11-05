@@ -1,0 +1,42 @@
+{
+  "id": "CurlMimic",
+  "repo": "curl/curl",
+  "commit": "116c5ae0f58025f25eebb9c3197513f022263e98",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/content_encoding.c",
+    "line": 661,
+    "code": "static const struct Curl_cwtype zstd_encoding = {"
+  },
+  "critical_operation": {
+    "file": "lib/content_encoding.c",
+    "line": 667,
+    "code": "Curl_cwriter_def_flush,"
+  },
+  "trace": [
+    {
+      "file": "lib/content_encoding.c",
+      "line": "600-644",
+      "code": "zstd_do_write() calls ZSTD_decompressStream() and only checks ZSTD_isError(); it ignores the 'remaining' hint, so a truncated frame is accepted."
+    },
+    {
+      "file": "lib/content_encoding.c",
+      "line": "661-669",
+      "code": "zstd_encoding registers Curl_cwriter_def_flush (no incomplete-stream check), while deflate_do_flush/gzip_do_flush/brotli_do_flush all added the 'stream ended before completion' check (commits 0036b55, f789f35)."
+    }
+  ],
+  "preconditions": [
+    "curl built with zstd support (libzstd) and --compressed / HTTP content decoding enabled (the default)",
+    "a server (or MITM) serves a truncated Content-Encoding: zstd response body"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "8.23.1-DEV / 8.24.0 (HEAD 116c5ae)",
+    "fixed_version": "unfixed",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Real curl built with zstd+zlib (zig cc): a truncated Content-Encoding: gzip body -> 'curl: (61) Gzip stream ended before completion' (REJECTED). The same truncated Content-Encoding: zstd body -> exit 0 and 1996 bytes of decompressed data written (ACCEPTED). zstd_encoding uses Curl_cwriter_def_flush, so the incomplete-stream hardening added to gzip/deflate/brotli (0036b55/f789f35) is missing for zstd."
+  }
+}
