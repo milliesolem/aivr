@@ -1,0 +1,57 @@
+{
+  "id": "RedisRabbit",
+  "repo": "redis/redis",
+  "commit": "dda59d1f8e852a5add0e9952fe992ba2f14b1f14",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "modules/vector-sets/vset.c",
+    "line": 811,
+    "code": "return exprRun(expr,json,json_len);"
+  },
+  "critical_operation": {
+    "file": "modules/vector-sets/fastjson.c",
+    "line": 339,
+    "code": "case '[':  return jsonParseArrayToken(p,end);"
+  },
+  "trace": [
+    {
+      "file": "modules/vector-sets/vset.c",
+      "line": "1116",
+      "code": "filter_expr = exprCompile(exprstr,&errpos);"
+    },
+    {
+      "file": "modules/vector-sets/vset.c",
+      "line": "805-811",
+      "code": "int vectorSetFilterCallback(void *value, void *privdata) { ... char *json = RedisModule_StringPtrLen(nv->attrib,&json_len); return exprRun(expr,json,json_len); }"
+    },
+    {
+      "file": "modules/vector-sets/expr.c",
+      "line": "764",
+      "code": "obj = jsonExtractField(json,json_len,t->str.start,t->str.len);"
+    },
+    {
+      "file": "modules/vector-sets/fastjson.c",
+      "line": "270-286",
+      "code": "static exprtoken *jsonParseArrayToken(const char **p, const char *end) { ... exprtoken *ele = jsonParseValueToken(p,end); ... }"
+    },
+    {
+      "file": "modules/vector-sets/fastjson.c",
+      "line": "333-339",
+      "code": "static exprtoken *jsonParseValueToken(const char **p, const char *end) { ... case '[': return jsonParseArrayToken(p,end); ... }"
+    }
+  ],
+  "preconditions": [
+    "Redis 8.0.1 .. 8.10.1 built with the default Vector Sets module (INCLUDE_VEC_SETS=1, auto-loaded at startup)",
+    "an authenticated client able to VADD/VSETATTR an element with a crafted deeply-nested JSON attribute and then run VSIM ... FILTER"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "52194c8f604b8b738b62a477d6bfdf65fb5c622d",
+    "vulnerable_version": "8.0.1 through 8.10.1",
+    "fixed_version": "8.10.2",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Compiling the verbatim modules/vector-sets/{expr,fastjson}.c (vulnerable tree src/ = Redis <=8.10.1, fixed tree src-fixed/ = 8.10.2) and driving exprRun('.f', {\"f\":[[[[...]]]]}): the vulnerable parser recurses jsonParseArrayToken<->jsonParseValueToken once per '[' with no depth cap and dies with SIGSEGV (rc 139) at ~100k nesting (600 KB attribute used in the PoC); the fixed 8.10.2 parser (commit 52194c8 'Limit Vector Sets JSON Parser Allowed Recursion Depth', MAX_RECURSION_DEPTH_LIMIT=1000) rejects the same input cleanly (exprRun returns 0, no crash). Matches Redis 8.10.2 release note 'Vector Sets: Deeply nested JSON used in Vector Set queries could cause the server to crash'. In redis-server the same path (VSIM FILTER -> vectorSetFilterCallback -> exprRun) crashes the whole process."
+  }
+}

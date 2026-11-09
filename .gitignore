@@ -15,3 +15,8 @@ rsa_crash_vuln
 rsa_crash_fixed
 xmss_crash_vuln
 xmss_crash_fixed
+harness
+harness_vuln
+harness_fixed
+tasmota_dgr_oob
+classes/
