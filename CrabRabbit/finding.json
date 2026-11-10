@@ -1,0 +1,53 @@
+{
+  "id": "CrabRabbit",
+  "repo": "cloudflare/pingora",
+  "commit": "3f87e92c982ee27c714506e16ae362776faea4aa",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "pingora-core/src/protocols/http/compression/mod.rs",
+    "line": 96,
+    "code": "pub fn new(compression_level: u32, decompress_enable: bool, preserve_etag: bool) -> Self {"
+  },
+  "critical_operation": {
+    "file": "pingora-core/src/protocols/http/compression/gzip.rs",
+    "line": 56,
+    "code": ".write_all(input)"
+  },
+  "trace": [
+    {
+      "file": "pingora-core/src/protocols/http/compression/mod.rs",
+      "line": "96",
+      "code": "pub fn new(compression_level: u32, decompress_enable: bool, preserve_etag: bool) -> Self {"
+    },
+    {
+      "file": "pingora-core/src/protocols/http/compression/mod.rs",
+      "line": "166",
+      "code": "pub fn adjust_decompression(&mut self, enabled: bool) {"
+    },
+    {
+      "file": "pingora-core/src/protocols/http/compression/mod.rs",
+      "line": "393",
+      "code": "pub fn response_body_filter(&mut self, data: Option<&Bytes>, end: bool) -> Option<Bytes> {"
+    },
+    {
+      "file": "pingora-core/src/protocols/http/compression/gzip.rs",
+      "line": "54-56",
+      "code": "self.decompress.get_mut().reserve(reserve_size);  // hint only\nself.decompress.write_all(input)                  // Vec<u8> grows to full output, no cap"
+    }
+  ],
+  "preconditions": [
+    "the ResponseCompression module is enabled with decompression on (ResponseCompressionCtx::new(level, true, ..) or adjust_decompression(true))",
+    "an upstream/origin responds with Content-Encoding (gzip/brotli) that the client's Accept-Encoding does not cover, so the proxy decides to decompress",
+    "the upstream is malicious or compromised (semi-trusted origin) and sends a highly-compressed 'bomb' body"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "pingora HEAD 3f87e92 (2026-11-09), unfixed",
+    "fixed_version": "unfixed",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "gzip.rs Decompressor::encode() (and brotli.rs) write decompressed bytes into a growable Vec<u8> with no maximum size; reserve() is only a capacity hint. A 12,773-byte gzip 'bomb' decompresses to 13,107,200 bytes (1026x) with no cap; the patched variant (4 MiB output cap) rejects the same input. The source comment 'cap the buf size amplification, there is a DoS risk of always allocate 3x the memory of the input buffer' shows the author capped only the reserve hint, not the actual decompressed output."
+  }
+}
