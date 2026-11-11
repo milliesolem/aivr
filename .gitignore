@@ -20,3 +20,5 @@ harness_vuln
 harness_fixed
 tasmota_dgr_oob
 classes/
+.cert.pem
+.key.pem
