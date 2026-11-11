@@ -22,3 +22,9 @@ tasmota_dgr_oob
 classes/
 .cert.pem
 .key.pem
+vhost_vuln
+vhost_fixed
+md_vuln
+md_fixed
+h2_vuln
+h2_fixed
