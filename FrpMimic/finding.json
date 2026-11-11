@@ -1,0 +1,34 @@
+{
+  "id": "FrpMimic",
+  "verdict": "confirmed",
+  "repo": "fatedier/frp",
+  "commit": "a2c975efb5e55102068065d61cfc17ffe34e939d",
+  "entry_point": {
+    "file": "pkg/auth/oidc.go",
+    "line": 276,
+    "code": "func NewTokenVerifier(cfg v1.AuthOIDCServerConfig) TokenVerifier {"
+  },
+  "critical_operation": {
+    "file": "pkg/auth/oidc.go",
+    "line": 283,
+    "code": "SkipClientIDCheck: cfg.Audience == \"\","
+  },
+  "trace": [
+    {"file": "pkg/config/v1/server.go", "line": "143-156", "code": "type AuthOIDCServerConfig struct { Issuer string ...; Audience string `json:\"audience,omitempty\"` }  // empty => audience (client ID) verification is skipped"},
+    {"file": "pkg/auth/oidc.go", "line": "276-287", "code": "NewTokenVerifier builds oidc.Config{ClientID: cfg.Audience, SkipClientIDCheck: cfg.Audience == \"\", ...}"},
+    {"file": "pkg/auth/oidc.go", "line": "298-304", "code": "VerifyLogin calls verifier.Verify(...) then records token.Subject (no subject allowlist)"}
+  ],
+  "preconditions": [
+    "frp server (frps) configured with OIDC authentication (auth.method = oidc) — opt-in, default is token auth",
+    "OIDC `audience` left unset (the field is optional/empty by default; the frp README example does set it)",
+    "attacker can obtain any valid ID token from the configured issuer — realistic for self-service/multi-tenant IdPs (Auth0-class) using the client-credentials grant"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "vulnerable_version": "0.72.0",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "With Audience unset (frp default) the verifier ACCEPTS an ID token minted for attacker-other-app (authentication bypass). With Audience set to legit-frp-client the same token is REJECTED (audience mismatch). Honest impact: a fail-open default that violates OIDC Core 3.1.3.7; realistic exploitation needs a self-service/multi-tenant IdP (client-credentials grant)."
+  }
+}
