@@ -1,0 +1,73 @@
+{
+  "id": "ZeroSesame",
+  "repo": "zeromicro/go-zero",
+  "commit": "f29c8612e86fca4ac1c6b718fd83f73fbe7235eb",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "zrpc/internal/auth/auth.go",
+    "line": 40,
+    "code": "func (a *Authenticator) Authenticate(ctx context.Context) error {"
+  },
+  "critical_operation": {
+    "file": "zrpc/internal/auth/auth.go",
+    "line": 64,
+    "code": "if a.strict {\n\t\t\treturn status.Error(codes.Internal, err.Error())\n\t\t}\n\n\t\treturn nil"
+  },
+  "trace": [
+    {
+      "file": "zrpc/internal/auth/auth.go",
+      "line": "40-56",
+      "code": "Authenticate(ctx) pulls app/token from incoming gRPC metadata, then returns a.validate(app, token)"
+    },
+    {
+      "file": "zrpc/internal/auth/auth.go",
+      "line": "59-62",
+      "code": "validate(): expect, err := a.cache.Take(app, func() { return a.store.Hget(a.key, app) })  // Redis hash lookup of the app -> expected token"
+    },
+    {
+      "file": "zrpc/internal/auth/auth.go",
+      "line": "63-69",
+      "code": "if err != nil { if a.strict { return Internal } return nil }  // FAIL-OPEN: unknown app (redis.Nil) or ANY Redis error => nil => AUTHENTICATED when strict=false"
+    },
+    {
+      "file": "zrpc/internal/auth/auth.go",
+      "line": "71-73",
+      "code": "if token != expect { return Unauthenticated, accessDenied }  // token is only checked when the app resolves; an unknown app never reaches this"
+    },
+    {
+      "file": "zrpc/internal/serverinterceptors/authinterceptor.go",
+      "line": "23-31",
+      "code": "UnaryAuthorizeInterceptor calls Authenticator.Authenticate(ctx) and only invokes the handler when it returns nil — so a fail-open nil directly executes the RPC"
+    },
+    {
+      "file": "fix commit f56630376b819f56d1f71247af05fdf0c7f9e0ce",
+      "line": "auth.go +59-69",
+      "code": "removed the strict branch and the `return nil` fallback entirely: any lookup error now returns status.Error(codes.Unauthenticated, accessDenied) — fail closed, and StrictControl is deprecated"
+    }
+  ],
+  "preconditions": [
+    "A go-zero zrpc server with Auth enabled in its RpcServerConf (the operator opts into authentication to protect the service)",
+    "StrictControl left at its default (false) — the documented JSON `optional` bool zero value. With strict=false any Redis lookup error returns nil (authenticated); strict=true would instead return an Internal error (fail closed, though it leaks internal Redis error details to the client). The default is the vulnerable path.",
+    "The attacker can reach the zrpc endpoint over the network and knows (or guesses) any method name; the app name is arbitrary and NOT registered in Redis",
+    "No valid credential is required: an unregistered app name makes Hget return redis.Nil, which the default strict=false path treats as success"
+  ],
+  "severity_claim": "critical",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "f56630376b819f56d1f71247af05fdf0c7f9e0ce",
+    "vulnerable_version": "go-zero <= v1.9.4 (latest release at 2026-11-12; the fix is unreleased on master)",
+    "fixed_version": "unreleased (master @ f56630376, 2026-11-01, PR #5848 'fix(security): zrpc Authenticator fails open')",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Driving the REAL go-zero v1.9.4 internal/auth.Authenticator against a faithful RESP Redis: a valid (registered) app+token is GRANTED; a wrong token for a registered app is DENIED (Unauthenticated) — proving the authenticator does enforce tokens. An UNKNOWN app ('attacker' with any token) is GRANTED (fail-open), and an injected Redis outage also GRANTs an unregistered caller (total fail-open). Marker printed: RESULT: AUTH BYPASS CONFIRMED.",
+    "real_exploit": {
+      "target": "github.com/zeromicro/go-zero v1.9.4 (real checkout at tag f29c8612e86fca4ac1c6b718fd83f73fbe7235eb) — the actual zrpc/internal/auth package is compiled from the real source and its Authenticate() method (the exact call the real UnaryAuthorizeInterceptor makes per request) is driven directly",
+      "driver": "driver/main.go",
+      "backend": "miniredis v2.35.0 (the faithful in-process Redis speaking the real RESP protocol over a TCP socket — the same backend used by go-zero's own auth regression tests, TestAuthenticatorFailClosed)",
+      "marker": "RESULT: AUTH BYPASS CONFIRMED",
+      "demonstrated": "The real Authenticator.Authenticate() grants access (returns nil) for an UNKNOWN app name and for a Redis-outage error, while still DENYING a wrong token for a registered app. The fail-open nil is what the real UnaryAuthorizeInterceptor treats as authenticated and passes straight to the RPC handler, so an unauthenticated caller invokes any protected method."
+    }
+  }
+}
