@@ -51,7 +51,14 @@
     "proof_commands": [
       "bash run.sh"
     ],
-    "observed_result": "Rules: #0 /public (no Access), #1 /admin (Access REQUIRED), #2 catch-all. The verbatim vulnerable FindMatchingRule+canonicalPathForMatching route /public/.;x/../admin, /admin;x=%2f..%2fpublic, /admin;x=%2F..%2Fpublic and /public\\..;x\\admin to rule #0 (NO Access) — a full Access bypass, since the origin (Servlet-style) serves /admin. The verbatim fixed pipeline routes all four to rule #1 (Access REQUIRED). DIFFERENTIAL PASS.",
-    "notes": "No public CVE/GHSA for VULN-170057 as of 2026-11-12. Normalization is opt-in in public releases (DisablePathNormalization defaults true since the 2026-09-29 VULN-141859 fix; TUNNEL_DISABLE_PATH_NORMALIZATION), hence AC:H. cloudflared is Apache-2.0; the PoC compiles the verbatim vulnerable (872b241f9487) and fixed (3106f9499d6a) matching code with minimal type stubs. Critic (dedicated subagent) PASS with Tomcat 9.0.71 origin verification."
+    "real_exploit": {
+      "target": "github.com/cloudflare/cloudflared @ 2026.10.7 (872b241f9487) — real ingress package (ParseIngress, FindMatchingRule, AccessJWTValidator middleware, httpService origin proxy) imported via go.mod replace and driven as a live proxy",
+      "driver": "driver/main.go",
+      "backend": "exploit.py (Python Servlet-style origin: strips matrix params on the raw path before decoding, then resolves dot-segments; /admin serves SECRET_ADMIN_DATA_FLAG{TunnelPicklock})",
+      "marker": "PWNED: backend served SECRET_ADMIN_DATA_FLAG",
+      "demonstrated": "GET /admin -> 403 by the real AccessJWTValidator (backend never hit). GET /public/.;x/../admin and GET /admin;x=%2f..%2fpublic -> real FindMatchingRule matches rule #0 (no Access) -> proxied raw -> backend Servlet-normalization serves /admin -> 2 backend /admin hits, secret returned. EXPLOITED/PWNED, exit 0. Dispatch is the verbatim proxy/proxy.go flow (FindMatchingRule -> rule.Handlers -> RoundTrip)."
+    },
+    "observed_result": "Real cloudflared 2026.10.7 code: direct /admin is filtered by AccessJWTValidator (403); the two crafted matrix-path requests are matched to the non-Access /public rule and proxied untouched, and the Servlet-style backend normalizes them to /admin and serves the secret (2/2). Driver log: 'GET /public/.;x/../admin -> rule #0 (accessRequired=false)'.",
+    "notes": "No public CVE/GHSA for VULN-170057 as of 2026-11-12. Normalization is opt-in in public releases (DisablePathNormalization defaults true since the 2026-09-29 VULN-141859 fix), hence AC:H. Critic (dedicated subagent) PASS with Tomcat 9.0.71 origin verification."
   }
 }
