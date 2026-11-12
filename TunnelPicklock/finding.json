@@ -1,0 +1,57 @@
+{
+  "id": "TunnelPicklock",
+  "repo": "cloudflare/cloudflared",
+  "commit": "872b241f94871665c1c157adefcf90c11f0ead96",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "ingress/ingress.go",
+    "line": 42,
+    "code": "func (ing Ingress) FindMatchingRule(hostname, path string) (*Rule, int) {"
+  },
+  "critical_operation": {
+    "file": "ingress/ingress.go",
+    "line": 97,
+    "code": "cleaned := path.Clean(p)"
+  },
+  "trace": [
+    {
+      "file": "ingress/ingress.go",
+      "line": "52-54",
+      "code": "if !ing.DisablePathNormalization && (rulesRequireAccess(ing.InternalRules) || rulesRequireAccess(ing.Rules)) { path = canonicalPathForMatching(path) }  // canonicalize the PERCENT-DECODED URL.Path"
+    },
+    {
+      "file": "ingress/ingress.go",
+      "line": "85-99",
+      "code": "canonicalPathForMatching: backslash->slash, then path.Clean(p). NO matrix-parameter (';') stripping. /public/.;x/../admin -> path.Clean pops '.;x' and '..' -> /public/admin; /admin;x=/../public (decoded from %2f) -> path.Clean -> /public"
+    },
+    {
+      "file": "ingress/ingress.go",
+      "line": "58-65",
+      "code": "first-match loop: the crafted path now matches the EARLIER non-Access /public rule, so Access is never required for the request"
+    },
+    {
+      "file": "fix commit 3106f9499d6a",
+      "line": "ingress.go +51-97",
+      "code": "FindMatchingRule now takes *url.URL; canonicalPathForMatching = normalizePath(escapedPath, stripPathParameters, decode, normalizeSeparators, resolveDotSegments) — matrix params are stripped BEFORE decoding so encoded separators inside parameter values cannot introduce traversal segments; plus a second decode-first interpretation re-check"
+    }
+  ],
+  "preconditions": [
+    "cloudflared 2026.10.0-2026.10.7 (or master pre-fix) running with path normalization ENABLED — the opt-in `--disable-path-normalization=false` flag or a remotely-managed tunnel whose orchestrator enables normalization (the VULN-141859 fix of 2026-09-29 shipped it disabled by default, to become default in future releases)",
+    "Ingress config where a public path rule precedes a protected (Access) path rule — the standard 'public part of the site + Access-gated admin' layout",
+    "The origin (or any hop downstream of cloudflared) interprets matrix parameters (';') and dot-segments the way Tomcat/Jetty and Servlet-style servers do, so the crafted URL resolves to the protected resource",
+    "Attacker can send arbitrary HTTP requests to the tunnel (no credentials needed)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:N/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "3106f9499d6a23e2f87ec5267eb4771b507a4d1f",
+    "vulnerable_version": "cloudflared 2026.10.0-2026.10.7 with path normalization enabled (opt-in --disable-path-normalization=false, or remotely-managed tunnels with normalization on; the VULN-141859 normalization landed 2026-09-29 disabled by default)",
+    "fixed_version": "unreleased (master @ 3106f9499d6a, 2026-11-04; Cloudflare-tracked VULN-170057)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Rules: #0 /public (no Access), #1 /admin (Access REQUIRED), #2 catch-all. The verbatim vulnerable FindMatchingRule+canonicalPathForMatching route /public/.;x/../admin, /admin;x=%2f..%2fpublic, /admin;x=%2F..%2Fpublic and /public\\..;x\\admin to rule #0 (NO Access) — a full Access bypass, since the origin (Servlet-style) serves /admin. The verbatim fixed pipeline routes all four to rule #1 (Access REQUIRED). DIFFERENTIAL PASS.",
+    "notes": "No public CVE/GHSA for VULN-170057 as of 2026-11-12. Normalization is opt-in in public releases (DisablePathNormalization defaults true since the 2026-09-29 VULN-141859 fix; TUNNEL_DISABLE_PATH_NORMALIZATION), hence AC:H. cloudflared is Apache-2.0; the PoC compiles the verbatim vulnerable (872b241f9487) and fixed (3106f9499d6a) matching code with minimal type stubs. Critic (dedicated subagent) PASS with Tomcat 9.0.71 origin verification."
+  }
+}
