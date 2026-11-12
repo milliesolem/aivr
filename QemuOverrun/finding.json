@@ -1,0 +1,73 @@
+{
+  "id": "QemuOverrun",
+  "repo": "qemu/qemu",
+  "commit": "67198583a1ef3432c784f2802c5cda914bc14ca8",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "block/vhdx.c",
+    "line": 1376,
+    "code": "vhdx_block_translate(s, sector_num, nb_sectors, &sinfo);"
+  },
+  "critical_operation": {
+    "file": "block/vhdx.c",
+    "line": 1158,
+    "code": "sinfo->file_offset = s->bat[sinfo->bat_idx] & VHDX_BAT_FILE_OFF_MASK;"
+  },
+  "trace": [
+    {
+      "file": "block/vhdx.c",
+      "line": "817",
+      "code": "s->virtual_disk_size = le64_to_cpu(s->virtual_disk_size);  // read straight from image metadata; pre-fix there is NO VHDX_MAX_IMAGE_SIZE (64 TiB) bound here (the fix inserts the check at line 818)"
+    },
+    {
+      "file": "block/vhdx.c",
+      "line": "884",
+      "code": "data_blocks_cnt = DIV_ROUND_UP(s->virtual_disk_size, s->block_size);  // uint32_t data_blocks_cnt: a >4 PiB size truncates (2^32+1 blocks -> 1)"
+    },
+    {
+      "file": "block/vhdx.c",
+      "line": "890-891",
+      "code": "s->bat_entries = data_blocks_cnt + ((data_blocks_cnt - 1) >> s->chunk_ratio_bits);  // BAT undersized relative to total_sectors"
+    },
+    {
+      "file": "block/vhdx.c",
+      "line": "1068",
+      "code": "bs->total_sectors = s->virtual_disk_size >> s->logical_sector_size_bits;  // total_sectors uses the FULL 64-bit size (~2^46), so high sectors stay 'valid'"
+    },
+    {
+      "file": "block/vhdx.c",
+      "line": "1137-1158",
+      "code": "sinfo->bat_idx = sector_num >> s->sectors_per_block_bits; ... sinfo->file_offset = s->bat[sinfo->bat_idx] & VHDX_BAT_FILE_OFF_MASK;  // NO bounds check on bat_idx (pre-fix); the fix adds assert(sinfo->bat_idx < s->bat_entries) at 1157"
+    },
+    {
+      "file": "block/vhdx.c",
+      "line": "1316",
+      "code": "s->bat[sinfo->bat_idx] |= state & VHDX_BAT_STATE_BIT_MASK;  // write path (vhdx_update_bat_table_entry) — but unreachable past the allocation: vhdx_co_writev calls vhdx_block_translate FIRST, whose OOB READ at line 1152 crashes before this write executes"
+    }
+  ],
+  "preconditions": [
+    "A malicious VHDX disk image whose 'Virtual Disk Size' metadata item is set to a size > 4 PiB (2^55+2^23) with a 8 MiB block size, so the uint32 block count wraps to 1",
+    "The image is opened by any QEMU tool (qemu-img info/convert/map/check, qemu-io, qemu-storage-daemon, or attached as a VM disk) — no privilege on the QEMU host beyond the ability to supply the image (cloud image-import pipelines, shared VM images, or a user running qemu-img locally)",
+    "A read or write at a high-but-in-range offset (>= 1 TiB) is issued — trivially reached by a guest on a >4 PiB virtual disk, or by qemu-io/qemu-img dd directly"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "67198583a1ef3432c784f2802c5cda914bc14ca8",
+    "vulnerable_version": "QEMU <= 11.1.3 (and Debian 10.0.13 qemu-img/qemu-io) — virtual_disk_size unvalidated, no bat_idx bounds check. Present since VHDX support (QEMU 2.0).",
+    "fixed_version": "unreleased on master (11.2.0-dev @ 67198583, 2026-10-23); NOT backported to stable-11.1 as of 2026-11-12 (stable-11.1 last touched block/vhdx.c 2025-09-15)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Driving the REAL qemu-img 10.0.13 / qemu-io binary: qemu-img info accepts a VHDX patched to 'virtual size: 32 PiB' (no VHDX_MAX_IMAGE_SIZE bound). CONTROL (unpatched 1 MiB image): read@0 succeeds, read@1PiB returns a clean 'read failed: Input/output error'. EXPLOIT (patched image): qemu-io read AND write at offset 1 PiB both die with SIGSEGV (exit 139) — the bat_idx = 2^27 runs far past the ~1 MiB BAT allocation (bat_entries=1). Both crashes are the OOB READ in vhdx_block_translate (the masked read result becomes a file offset, so no host bytes are disclosed; the write-path OOB store is unreachable because the read crashes first). Honest impact = host/VM crash (DoS), A:H only. Marker printed: QEMUOVERRUN-OK / Segmentation fault.",
+    "real_exploit": {
+      "target": "qemu 10.0.13 (Debian 13 qemu-img + qemu-io) — the real block/vhdx.c BAT translation code in the shipped binary, driven against a crafted VHDX",
+      "driver": "run.sh",
+      "backend": "qemu-img / qemu-io (real QEMU binaries) opening and I/O-driving the patched VHDX; make_vhdx.py crafts the malicious image by patching the real 'Virtual Disk Size' metadata item",
+      "marker": "Segmentation fault",
+      "demonstrated": "qemu-img info reports a 32 PiB virtual disk (missing size bound), and qemu-io SIGSEGVs (exit 139) on BOTH read and write at a 1 PiB offset — the unchecked bat_idx (2^27) reads far past the 1-entry BAT heap allocation. The unpatched 1 MiB control image errors cleanly at the same offset, proving the crash is caused by the oversized virtual_disk_size, not by the offset itself. Impact demonstrated = host/VM crash (DoS, A:H); the OOB read result is masked to a file offset (no host-memory disclosure, C:N) and the OOB write is unreachable (the read crashes first, I:N)."
+    },
+    "notes": "No public CVE/GHSA assigned as of 2026-11-12 (upstream tracks it under QEMU work_items 3762/4470/4487/4638/4733; reported independently by Palo Alto Networks, Calif.io, Xiang Chen, Daniel Wade, Mayank Jangid, Ken Hsu/Royce Lu/Bo Qu). The commit message confirms 'out-of-bounds access on the BAT array from both the read and write paths'. Fix is in master + v11.2.0-rc0 (commit 67198583, merged 2026-11-09); NOT backported to stable-11.1 (still vulnerable on the stable line). Palo Alto's independent assessment of the same bug rates it 5.5 MEDIUM (AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H) — DoS only; we follow that."
+  }
+}
