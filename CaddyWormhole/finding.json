@@ -1,0 +1,69 @@
+{
+  "id": "CaddyWormhole",
+  "repo": "caddyserver/caddy",
+  "commit": "0d98caea58f794f88e709b1bef2880996a471bca",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "modules/caddyhttp/rewrite/rewrite.go",
+    "line": 158,
+    "code": "func (rewr Rewrite) Rewrite(r *http.Request, repl *caddy.Replacer) bool {"
+  },
+  "critical_operation": {
+    "file": "modules/caddyhttp/rewrite/rewrite.go",
+    "line": 569,
+    "code": "func (rep substrReplacer) do(r *http.Request, repl *caddy.Replacer) {"
+  },
+  "trace": [
+    {
+      "file": "modules/caddyhttp/rewrite/rewrite.go",
+      "line": "569-587",
+      "code": "substrReplacer.do (uri replace /mount ''): changePath(r, func(p){ strings.Replace(CleanPath(p, mergeSlashes), find, replace, lim) }) — the resulting path is set verbatim; there is NO canonicalizePath afterwards (unlike StripPathPrefix/StripPathSuffix, which call canonicalizePath at lines 297/311)."
+    },
+    {
+      "file": "modules/caddyhttp/rewrite/rewrite.go",
+      "line": "613-629",
+      "code": "changePath: r.URL.Path = url.PathUnescape(substituted EscapedPath). For GET /mount../secret/flag.txt this yields the RELATIVE path '../secret/flag.txt' (no leading slash, '..' kept)."
+    },
+    {
+      "file": "modules/caddyhttp/matchers.go",
+      "line": "435-500",
+      "code": "MatchPath.MatchWithError: reqPathForPattern = CleanPath(r.URL.Path) = path.Clean('../secret/flag.txt') = '../secret/flag.txt' (path.Clean keeps a leading '..' on a RELATIVE path). Pattern '/secret/*' does not match -> the @blocked path /secret/* guard does NOT fire."
+    },
+    {
+      "file": "modules/caddyhttp/caddyhttp.go",
+      "line": "252-274",
+      "code": "SanitizedPathJoin(root, '../secret/flag.txt') = path.Clean('/' + reqPath) = path.Clean('/../secret/flag.txt') = '/secret/flag.txt' -> file_server serves root/secret/flag.txt (the guard never ran)."
+    },
+    {
+      "file": "modules/caddyhttp/rewrite/rewrite.go (fixed)",
+      "line": "602-608",
+      "code": "fix fc6c202ea6: oldPath := r.URL.Path; changePath(...); if r.URL.Path != oldPath { canonicalizePath(r) }. canonicalizePath anchors '../secret/flag.txt' to '/secret/flag.txt', so the path matcher now matches and the guard blocks."
+    }
+  ],
+  "preconditions": [
+    "Caddy v2.11.9 (or earlier) serving static files with file_server",
+    "A rewrite directive using uri_substring (`uri replace <find>`) or path_regexp (`uri path_regexp <find> <replace>`) that strips/rewrites a path prefix, placed BEFORE the guard in the handler chain",
+    "A path-based access guard on a sensitive subdirectory (e.g. `@blocked path /secret/*` + `respond 403`, or `basicauth`) placed after the rewrite",
+    "Attacker can send arbitrary HTTP requests (unauthenticated)"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "fc6c202ea60dd34aacfcb201403c8561f56da905",
+    "vulnerable_version": "Caddy v2.11.9 (commit 0d98caea58f794f88e709b1bef2880996a471bca, tag v2.11.9, released 2026-11-05)",
+    "fixed_version": "unreleased (master @ fc6c202ea6, 2026-11-10; no public release as of 2026-11-12)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Real Caddy v2.11.9 binary (built from cmd/caddy): GET /secret/flag.txt -> 403 (guard fires normally), GET /public/hello.txt -> 200 (control). The three traversal payloads /mount../secret/flag.txt, /mount..%2fsecret/flag.txt and /mount%2e%2e/secret/flag.txt each return 200 with SECRET-FLAG{CaddyWormhole-path-guard-bypass} (3/3 bypass). The same requests against fixed master (fc6c202ea6) return 403 (3/3 blocked), while /public/hello.txt still returns 200.",
+    "real_exploit": {
+      "target": "github.com/caddyserver/caddy v2.11.9 (commit 0d98caea58f794f88e709b1bef2880996a471bca) — the real cmd/caddy binary built from source, running the real http.handlers.rewrite (uri_substring), http.matchers.path, http.handlers.static_response and http.handlers.file_server modules",
+      "driver": "exploit.py",
+      "backend": "the real Caddy HTTP server (file_server) serving a staged filesystem whose /secret/flag.txt is protected by a `@blocked path /secret/*` + `respond 403` guard, with a preceding `uri replace /mount \"\"` rewrite",
+      "marker": "RESULT: CaddyWormhole EXPLOITED",
+      "demonstrated": "The real vulnerable Caddy serves the guarded /secret/flag.txt (HTTP 200 + secret body) for all three traversal payloads while correctly returning 403 for the direct /secret/flag.txt; the real fixed Caddy returns 403 for the same traversal payloads. Differential vuln-vs-fixed on the actual binaries, exit 0."
+    },
+    "notes": "No public CVE/GHSA as of 2026-11-12 — the fixes (fc6c202ea6, 7593fd002f, f4c634f0ed, 7591cff1fb, 3c65959560, c3fab6576f, ebfc03a7b6, 13d000e010) landed on master 2026-11-10/11 and postdate the latest release v2.11.9, so v2.11.9 is 0-day-vulnerable. The traversal is confined to the served root (SanitizedPathJoin still anchors to root), so impact is unauthorized read of any file inside the root that a path guard/basicauth was meant to protect — not arbitrary filesystem read."
+  }
+}

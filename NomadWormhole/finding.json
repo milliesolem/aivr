@@ -1,0 +1,52 @@
+{
+  "id": "NomadWormhole",
+  "repo": "hashicorp/nomad",
+  "commit": "8505c18a52284a7ccd0d1c46c6eae212fc214b24",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "drivers/shared/executor/executor.go",
+    "line": 416,
+    "code": "if err := makeExecutable(absPath); err != nil {"
+  },
+  "critical_operation": {
+    "file": "drivers/shared/executor/executor.go",
+    "line": 790,
+    "code": "if err := os.Chmod(binPath, perm|req); err != nil {"
+  },
+  "trace": [
+    {
+      "file": "drivers/shared/executor/executor.go",
+      "line": "772-790",
+      "code": "func makeExecutable(binPath string) error { ... fi, err := os.Stat(binPath); perm := fi.Mode().Perm(); req := os.FileMode(0555); if perm&req != req { if err := os.Chmod(binPath, perm|req); err != nil { ... } } }"
+    },
+    {
+      "file": "drivers/shared/executor/executor.go",
+      "line": "743-771",
+      "code": "func lookupBin(taskDir string, bin string) (string, error) { local := filepath.Join(taskDir, allocdir.TaskLocal, bin); if _, err := os.Stat(local); err == nil { return local, nil } ... }"
+    }
+  ],
+  "preconditions": [
+    "A malicious task running inside a Nomad allocation (v2.1.0 and earlier)",
+    "The task's command path is (or is swapped for) a symlink pointing at an arbitrary host file outside the allocation sandbox",
+    "The executor's makeExecutable() runs os.Chmod on that path, which follows the symlink"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:N/I:H/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "3e48ce44034cfaaf7b18103abe5ffb46b2a6ccce",
+    "vulnerable_version": "<= 2.1.0 (makeExecutable follows symlinks out of the task sandbox)",
+    "fixed_version": "2.1.1 (makeExecutable resolves chmod through os.OpenRoot; symlink escape refused)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "A symlink planted at the task's command path (pointing at a 0644 host file) makes the vulnerable v2.1.0 makeExecutable() chmod the HOST file to 0755 (escape). The fixed v2.1.1 logic resolves through os.OpenRoot(taskDir), which returns 'path escapes from parent' and leaves the host file at 0644. Fix commit 3e48ce440 (NMD-1638 / issue #28605, no public CVE) is a silent internal-audit fix.",
+    "real_exploit": {
+      "target": "hashicorp/nomad drivers/shared/executor makeExecutable() @ v2.1.0 (vulnerable) vs v2.1.1 (fixed, os.Root)",
+      "driver": "main.go",
+      "backend": "The verbatim vulnerable/fixed makeExecutable() logic driving real os.Stat/os.Chmod/os.OpenRoot against a real filesystem (a real symlink and a real host file)",
+      "marker": "SANDBOX ESCAPE CONFIRMED",
+      "demonstrated": "The exploit plants a symlink inside a fake task directory pointing at a 0644 host file. The vulnerable v2.1.0 code chmods the host file to 0755 (mode change on a file outside the sandbox); the fixed v2.1.1 code (os.OpenRoot confinement) returns 'path escapes from parent' and leaves the host file unchanged."
+    }
+  }
+}
