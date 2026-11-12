@@ -1,0 +1,52 @@
+{
+  "id": "AttnOverrun",
+  "repo": "microsoft/onnxruntime",
+  "commit": "4af944ffad174f561de207c47414a0a1034bde5c",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "onnxruntime/contrib_ops/cpu/attnlstm/deep_cpu_attn_lstm.cc",
+    "line": 101,
+    "code": "int input_size = narrow<int>(X_shape[2]);"
+  },
+  "critical_operation": {
+    "file": "onnxruntime/contrib_ops/cpu/attnlstm/deep_cpu_attn_lstm.cc",
+    "line": 112,
+    "code": "Status status = ValidateInputs("
+  },
+  "trace": [
+    {
+      "file": "onnxruntime/contrib_ops/cpu/attnlstm/deep_cpu_attn_lstm.cc",
+      "line": "97-101",
+      "code": "auto& X_shape = X.Shape(); int seq_length = narrow<int>(X_shape[0]); int batch_size = narrow<int>(X_shape[1]); int input_size = narrow<int>(X_shape[2]);  // reads X_shape[0..2] with NO rank check"
+    },
+    {
+      "file": "onnxruntime/contrib_ops/cpu/attnlstm/deep_cpu_attn_lstm.cc",
+      "line": "112",
+      "code": "Status status = ValidateInputs(X, W, R, ...);  // the rank validation runs AFTER the reads; a rank-<3 X makes X_shape[2] index past the span -> gsl::span contract violation -> std::terminate()"
+    },
+    {
+      "file": "onnxruntime/contrib_ops/cpu/attnlstm/deep_cpu_attn_lstm.cc",
+      "line": "383-392",
+      "code": "second copy of the same pattern in a helper: X_shape[0..2] read, then 'if (X_shape.NumDimensions() != 3) return ...' AFTER the reads"
+    },
+    {
+      "file": "class-fix precedent",
+      "line": "PR #33517 (9265e05ae9)",
+      "code": "2026-10-29 fix 'read Shape()[i] before ValidateInputShape' in RoiAlign + sibling kernels — missed MaxRoiPool (OrtOverrun) and AttnLSTM (this finding)"
+    }
+  ],
+  "preconditions": [
+    "An attacker supplies an ONNX model whose AttnLSTM input X declares a type but no shape (or a rank-<3 shape), and runs it through onnxruntime's CPU EP",
+    "Common in any ML inference service that loads attacker- or user-supplied models"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "onnxruntime 1.31.1 (and earlier) — unfixed at HEAD 4af944ff",
+    "fixed_version": "unfixed (no fix commit yet; class-fix precedent is PR #33517 / 9265e05ae9 for the sibling kernels)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Real onnxruntime==1.31.1 (PyPI wheel). A com.microsoft.AttnLSTM model with shapeless inputs: control (rank-3 X) returns a clean INVALID_ARGUMENT, while rank-2 / rank-1 / scalar X each abort with SIGABRT (-6) and 'terminate called without an active exception' — the CPU kernel reads X_shape[2] before ValidateInputs, so the rank mismatch walks off the shape span and calls std::terminate(). RESULT: ALL TRIGGER CASES CRASHED."
+  }
+}

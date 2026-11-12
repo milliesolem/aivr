@@ -1,0 +1,52 @@
+:³
+ä
+X
+W
+R
+B
+sequence_lens
+	initial_h
+	initial_c
+P
+am_query_layer_weights
+am_memory_layer_weights
+am_v_weights
+attn_memory
+attn_memory_seq_lens
+attn_layer_weightsYY_hY_c"AttnLSTM*
+hidden_size :com.microsoftattnoverrunZ	
+X
+Z	
+W
+Z	
+R
+Z	
+B
+Z
+sequence_lens
+Z
+	initial_h
+Z
+	initial_c
+Z	
+P
+Z
+am_query_layer_weights
+Z
+am_memory_layer_weights
+Z
+am_v_weights
+Z
+attn_memory
+Z
+attn_memory_seq_lens
+Z
+attn_layer_weights
+b	
+Y
+b
+Y_h
+b
+Y_c
+B
+com.microsoft
