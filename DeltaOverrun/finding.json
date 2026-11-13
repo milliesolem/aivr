@@ -1,0 +1,60 @@
+{
+  "id": "DeltaOverrun",
+  "repo": "google/leveldb",
+  "commit": "bb74ef739973a70ca9f0d90788a1da89b788c0ad",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "table/block.cc",
+    "line": 55,
+    "code": "static inline const char* DecodeEntry(const char* p, const char* limit,"
+  },
+  "critical_operation": {
+    "file": "table/block.cc",
+    "line": 71,
+    "code": "if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {"
+  },
+  "trace": [
+    {
+      "file": "table/block.cc",
+      "line": "71",
+      "code": "if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) { return nullptr; }  // uint32 addition overflows: non_shared=1 + value_length=0xffffffff wraps to 0, so 'remaining < 0' is always false and the bounds check is bypassed"
+    },
+    {
+      "file": "table/block.cc",
+      "line": "269-270",
+      "code": "key_.append(p, non_shared); value_ = Slice(p + non_shared, value_length);  // value Slice is built from the attacker-controlled length (0xffffffff) with no re-check"
+    },
+    {
+      "file": "include/leveldb/slice.h",
+      "line": "94",
+      "code": "std::string ToString() const { return std::string(data_, size_); }  // consuming the value copies size_ bytes -> up to 4 GiB out-of-bounds read"
+    },
+    {
+      "file": "fix commit 29465588d3",
+      "line": "71-72",
+      "code": "if (static_cast<uint32_t>(limit - p) < *non_shared || static_cast<uint32_t>(limit - p) - *non_shared < *value_length) { return nullptr; }  // two-step check cannot wrap"
+    }
+  ],
+  "preconditions": [
+    "A LevelDB-backed application opens an SSTable (.ldb/.sst) whose block entries are attacker-influenced (a downloaded/shared/synced database file, a game save, a cache the attacker can write)",
+    "The application iterates or Get()s the corrupted key so that Block::Iter::ParseNextKey decodes the malformed entry and the caller consumes the returned value",
+    "Google leveldb release 1.23 (Feb 2021) or earlier — the fix (29465588d3, Nov 2026) is unreleased"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "29465588d3dfdc80fba5e198037582b8fdb5dd60",
+    "vulnerable_version": "google/leveldb 1.23 (2021-02-23) and earlier, including current master prior to 29465588d3",
+    "fixed_version": "unreleased master @ 29465588d3 (2026-11-12)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Faithful C++ reproduction of table/block.cc DecodeEntry (vulnerable vs fixed) compiled with zig c++. A corrupt block entry (shared=0, non_shared=1, value_length=0xffffffff, 1 key byte — the exact bytes of the upstream CorruptedBlockEntryLengthOverflow regression test) makes the vulnerable 'remaining < (non_shared + value_length)' check wrap (1 + 0xffffffff == 0) and pass, so DecodeEntry returns non-null and the iterator yields a value Slice of size 0xffffffff (4 GiB) with 0 bytes of actual data remaining. The fixed two-step check returns nullptr (corruption).",
+    "real_exploit": {
+      "target": "google/leveldb table/block.cc DecodeEntry @ bb74ef73 (release 1.23) vs fix 29465588d3",
+      "driver": "exploit.cc",
+      "backend": "faithful C++ reproduction of the vulnerable/fixed DecodeEntry + Slice (exact logic from table/block.cc, util/coding.cc, include/leveldb/slice.h), compiled and executed natively",
+      "marker": "RESULT: INTEGER OVERFLOW -> OOB READ CONFIRMED",
+      "demonstrated": "The 32-bit addition non_shared + value_length wraps to 0 (CWE-190), bypassing the bounds check, so a corrupt block entry produces a 0xffffffff-byte value Slice (CWE-125 OOB read of up to 4 GiB past the block). The fixed code detects the corruption and returns nullptr."
+    }
+  }
+}
