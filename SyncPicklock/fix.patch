@@ -1,0 +1,16 @@
+diff --git a/lib/model/model.go b/lib/model/model.go
+index 2cb8fdb..4c77949 100644
+--- a/lib/model/model.go
++++ b/lib/model/model.go
+@@ -1666,6 +1666,11 @@ func (m *model) handleIntroductions(introducerCfg config.DeviceConfiguration, cm
+ 			// Don't have this folder, carry on.
+ 			continue
+ 		}
++		if !fcfg.SharedWith(introducerCfg.DeviceID) {
++			// The folder exists but is not shared with the introducer, so
++			// we don't trust them on the subject.
++			continue
++		}
+ 
+ 		folderChanged := false
+ 

@@ -1,0 +1,70 @@
+{
+  "id": "SyncPicklock",
+  "repo": "syncthing/syncthing",
+  "commit": "466857ae7a12671ab9b41140b9399c516497335f",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/model/model.go",
+    "line": 1653,
+    "code": "func (m *model) handleIntroductions(introducerCfg config.DeviceConfiguration, cm *protocol.ClusterConfig, folders map[string]config.FolderConfiguration, devices map[protocol.DeviceID]config.DeviceConfiguration)"
+  },
+  "critical_operation": {
+    "file": "lib/model/model.go",
+    "line": 1702,
+    "code": "fcfg.Devices = append(fcfg.Devices, config.FolderDeviceConfiguration{"
+  },
+  "trace": [
+    {
+      "file": "lib/model/model.go",
+      "line": "1653-1664",
+      "code": "for _, folder := range cm.Folders { fcfg, ok := folders[folder.ID]; if !ok { continue }  // the folder ID comes straight from the remote introducer's ClusterConfig"
+    },
+    {
+      "file": "lib/model/model.go",
+      "line": "1666-1673 (fixed)",
+      "code": "if !fcfg.SharedWith(introducerCfg.DeviceID) { continue }  // the missing check in the vulnerable build: nothing verifies that this folder is shared with the introducer"
+    },
+    {
+      "file": "lib/model/model.go",
+      "line": "1675-1699",
+      "code": "for _, device := range folder.Devices { ... if fcfg.SharedWith(device.ID) { continue } ... }  // every device the introducer names, including the introducer itself, reaches the share-list append"
+    },
+    {
+      "file": "lib/model/model.go",
+      "line": "1702-1706",
+      "code": "fcfg.Devices = append(fcfg.Devices, config.FolderDeviceConfiguration{DeviceID: device.ID, IntroducedBy: introducerCfg.DeviceID}); folderChanged = true  // the introducer is now a member of a folder it was never given"
+    },
+    {
+      "file": "lib/model/model.go",
+      "line": "1770-1800",
+      "code": "handleIntroductions(...) return values are written back into the running configuration; the folder's Devices list is what the model uses to decide whether to serve index and file data to a connected device"
+    },
+    {
+      "file": "fix commit 466857ae",
+      "line": "1669-1673",
+      "code": "if !fcfg.SharedWith(introducerCfg.DeviceID) { // The folder exists but is not shared with the introducer, so we don't trust them on the subject. continue }"
+    }
+  ],
+  "preconditions": [
+    "The victim has configured the attacker's device as an introducer (config.DeviceConfiguration.Introducer = true), e.g. a semi-trusted peer that is allowed to vouch for devices on folders it shares",
+    "The attacker knows the ID of another folder that exists on the victim but is not shared with the attacker (folder IDs are not secret; they are announced in ClusterConfig traffic and visible to connected devices)",
+    "The attacker can send a ClusterConfig message over its normal syncthing protocol connection and name itself (or any device) as a member of that folder"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "466857ae7a12671ab9b41140b9399c516497335f",
+    "vulnerable_version": "syncthing through v2.1.5 (bug present since the introducer feature was added; fixed in v2.1.6)",
+    "fixed_version": "syncthing v2.1.6 and later",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Real syncthing lib/model source (vulnerable 466857a^ = v2.1.5) compiled with the Go toolchain. The driver calls model.handleIntroductions() with a real protocol.ClusterConfig in which the introducer announces a 'private' folder that is shared with another device but not with the introducer. Vulnerable build: the introducer is appended to private.Devices (SharedWith(introducer)=true, config changed=true) and syncthing logs 'Sharing folder vouched for by introducer'. Fixed build (upstream 466857ae applied): the same announcement is ignored for 'private' (SharedWith=false), while the legitimate introduction of a peer into the folder that IS shared with the introducer still succeeds.",
+    "real_exploit": {
+      "target": "syncthing/syncthing @ 2ca95cf1498104113fdfde46df4107f2450a0f71 (v2.1.5, real source tree) vs the same tree with upstream fix 466857ae applied",
+      "driver": "poc_test.go",
+      "backend": "real syncthing lib/model package compiled from the vendored upstream snapshot; model.handleIntroductions() is driven with real config.FolderConfiguration, config.DeviceConfiguration and protocol.ClusterConfig values",
+      "marker": "RESULT: INTRODUCER FOLDER SCOPE ESCAPE CONFIRMED",
+      "demonstrated": "An introducer can add itself to a folder that is not shared with it, escaping the documented introducer boundary (CWE-639/862 authorization bypass). The victim's config then lists the introducer as a folder member, which is the authorization input used to serve that folder's index and file data. The fixed build rejects the self-add while preserving legitimate introductions."
+    }
+  }
+}
