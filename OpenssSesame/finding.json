@@ -1,0 +1,72 @@
+{
+  "id": "OpenssSesame",
+  "repo": "openssh/openssh-portable",
+  "commit": "3c6ec4c637342c51d9c54bbeecef25fd185cfdb8",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "auth-passwd.c",
+    "line": 196,
+    "code": "sys_auth_passwd(struct ssh *ssh, const char *password)"
+  },
+  "critical_operation": {
+    "file": "auth-passwd.c",
+    "line": 224,
+    "code": "return encrypted_password != NULL &&\n    strcmp(encrypted_password, pw_password) == 0;"
+  },
+  "trace": [
+    {
+      "file": "auth-passwd.c",
+      "line": "203",
+      "code": "char *pw_password = authctxt->valid ? shadow_pw(pw) : pw->pw_passwd;  // locked/key-only account -> shadow hash \"*\""
+    },
+    {
+      "file": "auth-passwd.c",
+      "line": "217",
+      "code": "if (authctxt->valid && pw_password[0] && pw_password[1]) salt = pw_password;  // \"*\" has pw_password[1]=='\\0', so salt stays NULL"
+    },
+    {
+      "file": "auth-passwd.c",
+      "line": "218",
+      "code": "encrypted_password = xcrypt(password, salt);  // NULL salt -> pick_salt() from another account's $6$ hash"
+    },
+    {
+      "file": "openbsd-compat/xcrypt.c",
+      "line": "96",
+      "code": "crypted = crypt(password, salt);  // musl crypt(): >256-byte key -> returns \"*\" (KEY_MAX error sentinel)"
+    },
+    {
+      "file": "auth-passwd.c",
+      "line": "224-225",
+      "code": "return encrypted_password != NULL && strcmp(encrypted_password, pw_password) == 0;  // \"*\" == \"*\" -> ACCEPT"
+    },
+    {
+      "file": "fix commits 4353fdc (10.6p2) + 1d28115 (master)",
+      "line": "231",
+      "code": "ret = encrypted_password != NULL && salt != NULL && strlen(pw_password) >= MIN_PASSWORD_HASH_LEN && strcmp(encrypted_password, pw_password) == 0;  // 1-byte \"*\" hash fails strlen>=4 and salt!=NULL -> REJECT"
+    }
+  ],
+  "preconditions": [
+    "sshd built against musl libc with PAM disabled (e.g. Alpine Linux default openssh-server package), OpenSSH < 10.6p2",
+    "PasswordAuthentication enabled (default)",
+    "A target account whose shadow password field is the locked marker \"*\" (key-only account, or a service account with no password set)",
+    "At least one other local account with a $5$ (SHA-256) or $6$ (SHA-512) password hash, so pick_salt() finds a salt",
+    "Attacker supplies any password of 257..1024 bytes (MAX_PASSWORD_LEN) over SSH"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "4353fdc43ef646c43a8dda7025cc1a898caf1482",
+    "vulnerable_version": "OpenSSH < 10.6p2 on Linux with musl libc and PAM disabled (e.g. Alpine Linux openssh 3.16-3.24, and any musl build without PAM)",
+    "fixed_version": "OpenSSH 10.6p2 (2026-11-05); Alpine openssh 10.6_p2-r0 / backports",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Real OpenSSH sys_auth_passwd()/xcrypt()/pick_salt()/shadow_pw() (verbatim from auth-passwd.c and openbsd-compat/xcrypt.c) compiled with x86_64-linux-musl-gcc -static and run against real musl crypt(). musl crypt() returns \"*\" for a 300-byte key with a $5$/$6$ salt (KEY_MAX=256 error sentinel), so the vulnerable strcmp(\"*\",\"*\") accepts a 300-byte password for the locked '*' account (return 1). The fixed function (MIN_PASSWORD_HASH_LEN>=4 and salt!=NULL guards) rejects the same input (return 0).",
+    "real_exploit": {
+      "target": "openssh/openssh-portable auth-passwd.c sys_auth_passwd() @ 3c6ec4c (pre-10.6p2) + openbsd-compat/xcrypt.c xcrypt()/pick_salt()/shadow_pw() driving musl libc crypt()",
+      "driver": "exploit.c",
+      "backend": "real OpenSSH functions (copied verbatim from the pinned commits) compiled natively against real musl libc (x86_64-linux-musl-gcc -static); getpwent()/getspnam() stubbed with a controlled /etc/shadow (account 'locked' = \"*\", account 'root' = valid $6$ hash)",
+      "marker": "RESULT: AUTHENTICATION BYPASS CONFIRMED",
+      "demonstrated": "A 300-byte SSH password authenticates as the locked/key-only 'locked' account on musl: crypt(300-byte key, $6$salt) returns the 1-byte \"*\" error sentinel, which equals the account's stored \"*\" hash, so the vulnerable sys_auth_passwd() returns 1 (ACCEPT). The 10.6p2-fixed sys_auth_passwd() rejects the identical input (returns 0) because strlen(\"*\") < MIN_PASSWORD_HASH_LEN(4) and no salt was derived."
+    }
+  }
+}

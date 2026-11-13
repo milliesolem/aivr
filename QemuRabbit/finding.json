@@ -1,0 +1,70 @@
+{
+  "id": "QemuRabbit",
+  "repo": "qemu/qemu",
+  "commit": "0d9843799c7e2485458b419b6cd3159809dcc9fc",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "hw/audio/virtio-snd.c",
+    "line": 374,
+    "code": "st_params->buffer_bytes = le32_to_cpu(params->buffer_bytes);"
+  },
+  "critical_operation": {
+    "file": "hw/audio/virtio-snd.c",
+    "line": 1050,
+    "code": "buffer = g_malloc0(sizeof(VirtIOSoundPCMBuffer) + size);"
+  },
+  "trace": [
+    {
+      "file": "hw/audio/virtio-snd.c",
+      "line": "374-375",
+      "code": "st_params->buffer_bytes = le32_to_cpu(params->buffer_bytes); st_params->period_bytes = le32_to_cpu(params->period_bytes);  // guest-controlled virtio-snd PCM_SET_PARAMS, NO cap and NO spec check"
+    },
+    {
+      "file": "hw/audio/virtio-snd.c",
+      "line": "1045-1048",
+      "code": "size = iov_size(elem->out_sg, elem->out_num) - msg_sz; ... buffer = g_malloc0(sizeof(VirtIOSoundPCMBuffer) + size);  // size is the guest transfer-descriptor length, unbounded by buffer_bytes"
+    },
+    {
+      "file": "hw/audio/virtio-snd.c",
+      "line": "1054-1055",
+      "code": "buffer->size = size; buffer->offset = 0;  // the queued per-transfer host allocation is proportional to the guest descriptor"
+    },
+    {
+      "file": "fix commit 259b58e68e",
+      "line": "371-381",
+      "code": "if (le32_to_cpu(params->buffer_bytes) > MAX_BUFFER_MIB * MiB) return VIRTIO_SND_S_BAD_MSG;  // cap at 500 MiB"
+    },
+    {
+      "file": "fix commit 9a0f03f815",
+      "line": "383-393",
+      "code": "if (le32_to_cpu(params->buffer_bytes) % le32_to_cpu(params->period_bytes) != 0) return VIRTIO_SND_S_BAD_MSG;  // VIRTIO 5.14.6.6.3.2 spec check"
+    },
+    {
+      "file": "fix commit 259b58e68e",
+      "line": "1048",
+      "code": "size = MIN(stream->params.buffer_bytes, size);  // cap each transfer allocation to the (now capped) buffer_bytes"
+    }
+  ],
+  "preconditions": [
+    "A QEMU VM with the virtio-snd (virtio sound) device attached (hw/audio/virtio-snd.c), reachable by a malicious guest",
+    "The guest sends VIRTIO_SND_R_PCM_SET_PARAMS with an oversized buffer_bytes and then queues TX/RX transfer descriptors of a matching size",
+    "No other host-side limit (cgroups/memory cgroup) is assumed; QEMU itself performed no cap before the fix"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "259b58e68ed9ca42331931702cc0f696e1aedee7",
+    "vulnerable_version": "QEMU master before 259b58e68e / 9a0f03f815 (unreleased as of 2026-11-13; affects all released QEMU with virtio-snd)",
+    "fixed_version": "QEMU master (commits 259b58e68e + 9a0f03f815, 2026-11-10, work_item 3587); not yet in a tagged release",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "The verbatim vulnerable set_pcm_params accepts buffer_bytes=0xffffffff (4 GiB) with no cap, and the verbatim tx_xfer allocation computes sizeof+4GiB via g_malloc0 — an unbounded host allocation (the harness reports HOST OOM rather than performing the multi-GiB allocation). The verbatim fixed code rejects the 4 GiB buffer_bytes at the 500 MiB cap (VIRTIO_SND_S_BAD_MSG) and, for an in-range stream, caps a 4 GiB transfer to the 8 MiB buffer_bytes (a bounded 8388640-byte allocation).",
+    "real_exploit": {
+      "target": "qemu/qemu hw/audio/virtio-snd.c @ 259b58e68e^ (the exact buffer-size validation the fix replaced; commit message: 'A faulty/malicious guest can try to exhaust host memory')",
+      "driver": "exploit.c",
+      "backend": "the vulnerable/fixed buffer-size validation reproduced byte-for-byte from virtio-snd.c and driven against real glibc malloc (g_malloc0); QEMU device types stubbed since the full QEMU object graph is not linkable standalone",
+      "marker": "RESULT: GUEST->HOST MEMORY EXHAUSTION CONFIRMED",
+      "demonstrated": "vulnerable virtio-snd stores a guest-controlled 4 GiB buffer_bytes and performs an unbounded g_malloc0(sizeof + 4 GiB) host allocation per transfer (memory exhaustion / host OOM); fixed code rejects it at the 500 MiB cap and bounds each transfer to buffer_bytes."
+    }
+  }
+}
