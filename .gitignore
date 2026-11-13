@@ -28,3 +28,4 @@ md_vuln
 md_fixed
 h2_vuln
 h2_fixed
+*.onnx

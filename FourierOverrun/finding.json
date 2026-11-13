@@ -1,0 +1,57 @@
+{
+  "id": "FourierOverrun",
+  "repo": "microsoft/onnxruntime",
+  "commit": "4af944ffad174f561de207c47414a0a1034bde5c",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "onnxruntime/core/providers/cpu/signal/dft.cc",
+    "line": 634,
+    "code": "Status STFT::Compute(OpKernelContext* ctx) const {"
+  },
+  "critical_operation": {
+    "file": "onnxruntime/core/providers/cpu/signal/dft.cc",
+    "line": 645,
+    "code": "const auto is_real_valued = signal_shape.NumDimensions() == 2 || signal_shape[signal_shape.NumDimensions() - 1] == 1;"
+  },
+  "trace": [
+    {
+      "file": "onnxruntime/core/providers/cpu/signal/dft.cc",
+      "line": "644-646",
+      "code": "const auto& signal_shape = signal->Shape(); ... is_real_valued = signal_shape.NumDimensions() == 2 || signal_shape[signal_shape.NumDimensions() - 1] == 1;  // rank-0 -> signal_shape[SIZE_MAX] (size_t underflow) read BEFORE any rank check"
+    },
+    {
+      "file": "onnxruntime/core/providers/cpu/signal/dft.cc",
+      "line": "653-654",
+      "code": "if (is_real_valued) ORT_RETURN_IF_ERROR((short_time_fourier_transform<float, float>(ctx, is_onesided_, false)));  // rank-1 signal {1} makes is_real_valued true"
+    },
+    {
+      "file": "onnxruntime/core/providers/cpu/signal/dft.cc",
+      "line": "552-553",
+      "code": "const auto batch_size = signal_shape[0]; const auto signal_size = signal_shape[1];  // rank-1 -> signal_shape[1] out of bounds; rank validation (signal_components) runs AFTER"
+    }
+  ],
+  "preconditions": [
+    "An attacker supplies an ONNX model whose STFT node's 'signal' input declares tensor(float) with NO shape (shape=None), so schema shape inference cannot reject rank-mismatched runtime tensors",
+    "The victim runs the model through onnxruntime's CPU EP with a rank-0 (scalar) or rank-1 (shape {1}) signal tensor"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "onnxruntime 1.31.1 (PyPI latest) and earlier; main @ 4af944ffad174f561de207c47414a0a1034bde5c (2026-11-12)",
+    "fixed_version": "none at time of writing (0-day; sibling kernels fixed by PR #33517 / 9265e05ae9, STFT/DFT signal ops missed)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Real onnxruntime==1.31.1 (PyPI wheel). A standard-domain STFT model with shapeless inputs: control (rank-2 signal) returns a clean RAN-OK; rank-1 (shape {1}) and scalar (rank-0) signal each abort with SIGABRT (-6) and 'terminate called without an active exception' — STFT::Compute reads signal_shape[NumDimensions()-1] (rank-0 -> signal_shape[SIZE_MAX]) and short_time_fourier_transform reads signal_shape[1] (rank-1) before any rank check, so the rank mismatch walks off the shape span and calls std::terminate(). RESULT: ALL TRIGGER CASES CRASHED, control clean.",
+    "real_exploit": {
+      "target": "microsoft/onnxruntime 1.31.1 (real PyPI wheel) — the CPU STFT kernel in core/providers/cpu/signal/dft.cc (STFT::Compute + short_time_fourier_transform), driven via a crafted shapeless-input ONNX model",
+      "driver": "exploit.py",
+      "backend": "onnxruntime InferenceSession (CPUExecutionProvider) loading a shapeless-input STFT model and running it with rank-0/rank-1 signal tensors in fresh subprocesses",
+      "marker": "terminate called without an active exception",
+      "demonstrated": "control (rank-2 signal) exits clean with 'RAN-OK'; rank-1 {1} and scalar signal each crash the real onnxruntime process with SIGABRT (-6) and 'terminate called without an active exception' (gsl::span contract violation from the unvalidated signal_shape indexing). The process abort is deterministic and confined to the rank mismatch (control does not crash). Impact = denial of service of the inference process (A:H), no confidentiality/integrity impact (the OOB read is a bounds-contract terminate, not a data disclosure)."
+    },
+    "notes": "No public CVE/GHSA at time of writing. This is the same 'read Shape()[i] before ValidateInputShape/rank check' class as PR #33517 (9265e05ae9, fixed Conv/ConvInteger/QLinearConv/CropAndResize/Einsum/AffineGrid) and the shipped siblings AlignAbort (RoiAlign), OrtOverrun (MaxRoiPool) and AttnOverrun (AttnLSTM). The signal-domain STFT/DFT kernels were not covered by that fix: DFT::Compute (dft.cc:427-428) reads X_shape[NumDimensions()-1] before the axis/rank validation, so a rank-0 DFT input also aborts; STFT is the primary PoC target because it additionally aborts on rank-1 inputs."
+  }
+}
