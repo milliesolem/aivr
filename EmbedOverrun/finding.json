@@ -1,0 +1,55 @@
+{
+  "id": "EmbedOverrun",
+  "repo": "microsoft/onnxruntime",
+  "commit": "4af944ffad174f561de207c47414a0a1034bde5c",
+  "verdict": "confirmed",
+  "cwe": "CWE-617",
+  "entry_point": {
+    "file": "onnxruntime/contrib_ops/cpu/bert/embed_layer_norm.cc",
+    "line": 43,
+    "code": "ORT_RETURN_IF_ERROR(embed_layer_norm::CheckInputs(context));"
+  },
+  "critical_operation": {
+    "file": "onnxruntime/contrib_ops/cpu/bert/embed_layer_norm_helper.h",
+    "line": 31,
+    "code": "if (input_ids->Shape()[1] != position_ids->Shape()[1]) {"
+  },
+  "trace": [
+    {
+      "file": "onnxruntime/contrib_ops/cpu/bert/embed_layer_norm.cc",
+      "line": "42-43",
+      "code": "Status EmbedLayerNorm<T>::Compute(OpKernelContext* context) const {\n  ORT_RETURN_IF_ERROR(embed_layer_norm::CheckInputs(context));"
+    },
+    {
+      "file": "onnxruntime/contrib_ops/cpu/bert/embed_layer_norm_helper.h",
+      "line": "17-31",
+      "code": "inline Status CheckInputs(const TOpKernelContext* context, bool quantizedVersion = false) {\n  ...\n  const Tensor* position_ids = context->template Input<Tensor>(8);  // optional\n  if (nullptr != position_ids) {\n    if (input_ids->Shape()[1] != position_ids->Shape()[1]) {  // <-- no rank guard for position_ids"
+    },
+    {
+      "file": "onnxruntime/contrib_ops/cpu/bert/embed_layer_norm_helper.h",
+      "line": "53-57",
+      "code": "const auto& input_dims = input_ids->Shape().GetDims();\nif (input_dims.size() != 2) { ... }  // input_ids rank IS validated — but only AFTER position_ids->Shape()[1] was already read at line 31"
+    }
+  ],
+  "preconditions": [
+    "an attacker who can feed onnxruntime a crafted .onnx model (or a tensor) — local model processing, or an inference service running attacker-supplied models",
+    "the model declares the optional position_ids input (EmbedLayerNormalization input 8) with rank 1; onnxruntime's shape inference validates input_ids rank but does NOT validate position_ids rank, so the malformed model loads"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "1.31.1 (HEAD 4af944f)",
+    "fixed_version": "unfixed",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "onnxruntime 1.31.1 EmbedLayerNormalization (com.microsoft): control model (position_ids rank 2) runs clean and returns outputs; vulnerable model (position_ids rank 1) aborts with SIGABRT (-6, 'terminate called without an active exception') from CheckInputs reading position_ids->Shape()[1] (embed_layer_norm_helper.h:31) with no rank guard. Unfixed at HEAD 4af944f.",
+    "real_exploit": {
+      "target": "microsoft/onnxruntime 1.31.1 (HEAD 4af944f) — the real onnxruntime Python wheel",
+      "driver": "exploit.py",
+      "backend": "the real onnxruntime CPUExecutionProvider EmbedLayerNormalization kernel + CheckInputs validator (com.microsoft contrib op)",
+      "marker": "terminate called without an active exception",
+      "demonstrated": "the real onnxruntime process aborts with SIGABRT when the optional position_ids input (rank 1) reaches CheckInputs; the rank-2 control model runs clean and returns the expected (4,8,16)/(4,)/(4,8,16) outputs"
+    }
+  }
+}
