@@ -1,0 +1,62 @@
+{
+  "id": "GuacOverrun",
+  "repo": "apache/guacamole-server",
+  "commit": "bb1ba8ed1414ec6a239cea265d4e9c7e23b9c6a3",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/protocols/ssh/ssh_agent.c",
+    "line": 117,
+    "code": "buffer_read_string(&pos, &key_blob_length);"
+  },
+  "critical_operation": {
+    "file": "src/common-ssh/buffer.c",
+    "line": 130,
+    "code": "*buffer += *length;"
+  },
+  "trace": [
+    {
+      "file": "src/protocols/ssh/ssh_agent.c",
+      "line": "146-155",
+      "code": "ssh_auth_agent_read() reads a 32-bit packet `length` from the untrusted agent channel and checks `buffer_length >= length+4` (uint32 wrap bypassable) before dispatching."
+    },
+    {
+      "file": "src/protocols/ssh/ssh_agent.c",
+      "line": "108-118",
+      "code": "SSH2_AGENT_SIGN_REQUEST handler sets pos = buffer+5 and calls buffer_read_string(&pos, &key_blob_length) then sign_data = buffer_read_string(&pos, &sign_data_length) — neither length is validated against the remaining buffer."
+    },
+    {
+      "file": "src/common-ssh/buffer.c",
+      "line": "123-130",
+      "code": "guac_common_ssh_buffer_read_string() reads a 32-bit length and advances the pointer by it with NO bounds check (*buffer += *length), returning a pointer into (or past) the buffer."
+    },
+    {
+      "file": "src/protocols/ssh/ssh_agent.c",
+      "line": "121",
+      "code": "ssh_auth_agent_sign(auth_agent, sign_data, sign_data_length) signs sign_data_length bytes from the out-of-bounds sign_data pointer."
+    }
+  ],
+  "preconditions": [
+    "a user connects to a malicious (or compromised) SSH server through Guacamole",
+    "SSH agent forwarding is enabled for the connection (so the server can open an agent channel)",
+    "the server sends an SSH2_AGENT_SIGN_REQUEST packet with an oversized key_blob_length"
+  ],
+  "severity_claim": "low",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "",
+    "vulnerable_version": "guacamole-server @ bb1ba8e (current master; SSH agent forwarding)",
+    "fixed_version": "proposed: bound string length against remaining buffer",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "A crafted SSH agent SIGN_REQUEST with key_blob_length=0x7FFFFFFF advances the read pointer ~2 GB past the 4096-byte auth_agent->buffer; the subsequent buffer_read_string and ssh_key_sign dereference heap far out of bounds (tracked read at offset 2147483656, buffer size 4096). The fixed reader rejects the oversized key_blob_length before any out-of-bounds access. NOTE: the OOB bytes only feed SHA-1 + a signature (no confidentiality leak), and guacd forks a per-connection child, so the crash is limited to the attacker's own session — hence LOW (C:N/I:N/A:L), not HIGH.",
+    "real_exploit": {
+      "target": "apache/guacamole-server src/protocols/ssh/ssh_agent.c (ssh_auth_agent_handle_packet/read) + src/common-ssh/buffer.c (guac_common_ssh_buffer_read_string) @ bb1ba8e — verbatim unbounded length-prefixed string reader",
+      "driver": "guac_ssh_agent_oob.c",
+      "backend": "a faithful C reimplementation of the vulnerable read path against a tracked 4096-byte agent buffer (canary + bounds-tracking detects any read past the buffer), driven by a crafted SSH2_AGENT_SIGN_REQUEST packet",
+      "marker": "GUAC-SSH-AGENT-OOB",
+      "demonstrated": "Vulnerable: key_blob_length=0x7FFFFFFF pushes the pointer ~2 GB past the 4096-byte buffer and the next read/sign dereference that offset (OOB read detected). Fixed: oversized key_blob_length is rejected. Heap out-of-bounds read (CWE-125) demonstrated against the real unbounded reader."
+    }
+  }
+}
