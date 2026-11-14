@@ -1,0 +1,63 @@
+{
+  "id": "DolphiOverrun",
+  "repo": "dolphin-emu/dolphin",
+  "commit": "96f8181230e6b4445675e7b6c5d913c189f4d7bb",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "Source/Core/Core/State.cpp",
+    "line": 583,
+    "code": "if (!GetVersionFromLZO(header, f))"
+  },
+  "critical_operation": {
+    "file": "Source/Core/Core/State.cpp",
+    "line": 520,
+    "code": "const int res = lzo1x_decompress(out, cur_len, buffer.data(), &new_len, nullptr);"
+  },
+  "trace": [
+    {
+      "file": "Source/Core/Core/State.cpp",
+      "line": "580",
+      "code": "if (header.legacy_header.lzo_size != 0)"
+    },
+    {
+      "file": "Source/Core/Core/State.cpp",
+      "line": "510-515",
+      "code": "static bool GetVersionFromLZO(...) { lzo_uint32 cur_len = 0; lzo_uint new_len = 0; Common::UniqueBuffer<u8> buffer(header.legacy_header.lzo_size); }"
+    },
+    {
+      "file": "Source/Core/Core/State.cpp",
+      "line": "517",
+      "code": "if (!f.ReadArray(&cur_len, 1) || !f.ReadBytes(out, cur_len))"
+    },
+    {
+      "file": "Source/Core/Core/State.cpp",
+      "line": "520",
+      "code": "const int res = lzo1x_decompress(out, cur_len, buffer.data(), &new_len, nullptr);"
+    }
+  ],
+  "preconditions": [
+    "The user loads a crafted legacy savestate (.sav) file whose 24-byte StateHeaderLegacy sets lzo_size (offset 8) to a small value (e.g. 64) and whose compressed LZO block decompresses to more than lzo_size bytes",
+    "The compressed input length field (cur_len, the u32 read right after the header) may additionally exceed OUT_LEN (139331), overflowing the fixed out[OUT_LEN] staging buffer",
+    "No privileges required: savestate files are freely shared/downloaded and loading one is a routine user action; the header is entirely attacker-controlled"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "f662e8585f327e03da026f58bc1e7cebb159b8cb",
+    "vulnerable_version": "all releases up to and including Dolphin 2609a (2026-10-07); also 2606/2606a/2609 and master before f662e858",
+    "fixed_version": "2609b (2026-11-07) — the fix (PR #14968, 'Core: Bound legacy savestate LZO decompression') is backported into the 2609b hotfix; verified lzo1x_decompress_safe + buffer(IN_LEN) + cur_len>OUT_LEN present at tag 2609b",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Differential against the REAL Dolphin-vendored miniLZO (Externals/LZO/minilzo.c, copied byte-for-byte). VULNERABLE GetVersionFromLZO: lzo1x_decompress (unsafe) writes 4096 bytes into a 64-byte lzo_size-controlled heap buffer (4032 canary bytes clobbered = CWE-787 OOB write), and ReadBytes(out, cur_len=OUT_LEN+128) writes 128 bytes past the 139331-byte out[] staging buffer. FIXED GetVersionFromLZO: lzo1x_decompress_safe into a fixed IN_LEN (131072) buffer writes 4096 bytes with 0 canary bytes clobbered, and cur_len > OUT_LEN is rejected before reading. Marker: DOLPHIOVERRUN-OK.",
+    "real_exploit": {
+      "target": "dolphin-emu/dolphin @ 96f81812 (pre-fix) — the actual vendored LZO decompressor Externals/LZO/minilzo.c (byte-identical, under vendor/) plus the exact GetVersionFromLZO() logic from Source/Core/Core/State.cpp:510-520",
+      "driver": "exploit.c",
+      "backend": "Dolphin's real miniLZO decompressor driven through a faithful reproduction of State.cpp GetVersionFromLZO() parsing a crafted legacy .sav (24-byte header + u32 cur_len + LZO block), with canary regions placed after the lzo_size-sized heap buffer and after the out[OUT_LEN] staging buffer",
+      "marker": "DOLPHIOVERRUN-OK",
+      "demonstrated": "The unsafe lzo1x_decompress writes 4096 decompressed bytes into a 64-byte attacker-sized heap buffer (4032 canary bytes clobbered) and ReadBytes reads OUT_LEN+128 bytes into the fixed out[OUT_LEN] staging buffer (128 canary bytes clobbered) — two independent out-of-bounds writes. The fixed path (lzo1x_decompress_safe + fixed IN_LEN buffer + cur_len>OUT_LEN reject) contains both with zero canary clobbering."
+    },
+    "notes": "No public CVE/GHSA assigned to this specific legacy-savestate LZO decompression bug (PR #14968). Dolphin fixed several OTHER malformed-file memory-safety bugs earlier in 2026 (GCZ heap overflow GHSA-7pvc-j9pm-c2rp, a NetPlay save-sync LZO buffer overflow in 2606a, and a different save-state OOB write in 2609a), but this bug is a distinct, later fix (2026-11) with no advisory identifier. It is fixed in the 2609b hotfix (2026-11-07): the source at tag 2609b uses lzo1x_decompress_safe + a fixed IN_LEN output buffer + a cur_len>OUT_LEN reject, while 2609a and every earlier release still use the unsafe lzo1x_decompress into an lzo_size-sized buffer with no cur_len bound. The bug is present since the legacy LZO savestate path was introduced and is reachable whenever a loaded .sav has lzo_size != 0, which is fully attacker-controlled. The overrun size and the decompressed bytes are attacker-influenced, making heap corruption (and, with ASLR/guard-page bypass, code execution) the realistic impact, with a deterministic crash as the floor."
+  }
+}
