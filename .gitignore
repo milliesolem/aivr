@@ -30,3 +30,6 @@ h2_vuln
 h2_fixed
 *.onnx
 flv_null_deref
+
+# compiled PoC binaries
+*.bin

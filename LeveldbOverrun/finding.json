@@ -1,0 +1,63 @@
+{
+  "id": "LeveldbOverrun",
+  "repo": "google/leveldb",
+  "commit": "99b3c03b3284f5886f9ef9a4ef703d57373e61be",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "table/block.cc",
+    "line": 71,
+    "code": "if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {"
+  },
+  "critical_operation": {
+    "file": "table/block.cc",
+    "line": 270,
+    "code": "value_ = Slice(p + non_shared, value_length);"
+  },
+  "trace": [
+    {
+      "file": "table/block.cc",
+      "line": "54-73",
+      "code": "static inline const char* DecodeEntry(const char* p, const char* limit, uint32_t* shared, uint32_t* non_shared, uint32_t* value_length) { ... if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) return nullptr; }  // *non_shared + *value_length are BOTH uint32_t -> the sum wraps; non_shared=1 + value_length=0xffffffff == 0, so a 16-byte block passes the bounds check"
+    },
+    {
+      "file": "table/block.cc",
+      "line": "263",
+      "code": "p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);"
+    },
+    {
+      "file": "table/block.cc",
+      "line": "264-271",
+      "code": "if (p == nullptr || key_.size() < shared) { CorruptionError(); return false; } else { key_.resize(shared); key_.append(p, non_shared); value_ = Slice(p + non_shared, value_length); ... }  // value_ is a Slice of length 0xffffffff beginning 8 bytes into a 16-byte block"
+    },
+    {
+      "file": "table/block.cc",
+      "line": "90-92",
+      "code": "uint32_t NextEntryOffset() const { return (value_.data() + value_.size()) - data_; }  // wraps to 7 -> current_ < restarts_ (8) -> the corrupt entry is reported Valid()"
+    }
+  ],
+  "preconditions": [
+    "An application links the released leveldb 1.23 (or any version since the DecodeEntry bounds check was introduced) and opens a data block (SSTable) whose contents are corrupted or attacker-influenced",
+    "The crafted block encodes shared=0, non_shared=1, value_length=0xffffffff (varint) followed by a single key byte and a restart array, so non_shared + value_length wraps to 0 and the bounds check is bypassed",
+    "The application calls Block::Iter (via Get/Seek/NewIterator) on the block; the iterator then hands back a Valid entry whose value() Slice is 0xffffffff bytes long and points past the block buffer"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "29465588d3dfdc80fba5e198037582b8fdb5dd60",
+    "vulnerable_version": "leveldb 1.23 (2021-02-23, latest release) and all earlier releases; also master before 2946558 (2026-11-04)",
+    "fixed_version": "unreleased on master only (2946558, merged 2026-11-04); no leveldb release ships the fix (1.23 remains the newest tagged release)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Differential against the REAL leveldb 1.23 table/block.cc. VULNERABLE build: Block::Iter::SeekToFirst() returns Valid()==true on a 16-byte corrupt block, key=\"a\", value().size()==4294967295 (0xffffffff) — the value Slice begins 8 bytes into a 16-byte buffer placed at the end of an mmap page with a PROT_NONE guard page after it, and forcing a read of the value walks off the page -> SIGSEGV (exit 139). FIXED build (block.cc == master @ 2946558): the same block is rejected with iter->Valid()==false and status=\"Corruption: bad entry in block\", no OOB read (exit 0). Marker printed: LEVELDBOVERRUN-OK.",
+    "real_exploit": {
+      "target": "google/leveldb 1.23 (the actual table/block.cc Block::Iter / DecodeEntry, vendored verbatim under vendor/leveldb-1.23/) — the real vulnerable parser, not a re-implementation",
+      "driver": "exploit.cc",
+      "backend": "real leveldb 1.23 table/block.cc compiled with zig c++ and driven against a crafted 16-byte data block placed at the end of an mmap page backed by a PROT_NONE guard page (so any read past the block faults deterministically)",
+      "marker": "LEVELDBOVERRUN-OK",
+      "demonstrated": "The vulnerable iterator accepts the corrupt block (Valid()==true) and returns value() = Slice(block+8, 0xffffffff), i.e. an out-of-bounds read of up to 4 GiB past a 16-byte buffer; forcing that read SIGSEGVs (exit 139) at the guard page. The same block compiled against the fixed DecodeEntry (upstream 2946558) is rejected as Status::Corruption before any read. Impact demonstrated = deterministic process crash (A:H); the OOB read length is fully attacker-controlled and, in heap-backed embeddings, reads adjacent heap (keys/values/other blocks) so C:H info-disclosure is a real consequence."
+    },
+    "notes": "No public CVE/GHSA assigned; the fix 29465588 (2026-11-04, leveldb team, PiperOrigin-RevId 1013853426) is only on master and no leveldb release ships it (1.23 from 2021-02 remains the newest tag), so every released leveldb is still vulnerable. The underlying integer overflow was independently and publicly reported on GitHub (issues #1348 'Block entry bounds check wraps around', and open fix PRs #1320/#1323/#1353/#1370/#1379) — Google's VRP reviewed the first report as valid and directed it to a public issue rather than embargo, but no fix was ever merged or released until the team's own 29465588. The bug is therefore '0-day' only in the sense that NO released version is patched; it is not a novel/secret discovery. LevelDB's contract is to detect corrupt blocks gracefully (Status::Corruption); this uint32_t sum overflow breaks that contract with an OOB read of attacker-controlled length (up to 4 GiB). Fix = two-step bounds check to avoid the wrap."
+  }
+}
