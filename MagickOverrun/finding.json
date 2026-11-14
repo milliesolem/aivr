@@ -1,0 +1,56 @@
+{
+  "id": "MagickOverrun",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "MagickCore/shear.c",
+    "line": 1799,
+    "code": "status=XShearImage(rotate_image,shear.x,width,height,bounds.x,(ssize_t)(rotate_image->rows-height)/2,exception);"
+  },
+  "critical_operation": {
+    "file": "MagickCore/shear.c",
+    "line": 1300,
+    "code": "SetPixelViaPixelInfo(image,&background,q);"
+  },
+  "trace": [
+    {
+      "file": "MagickCore/shear.c",
+      "line": "1714",
+      "code": "MagickExport Image *ShearRotateImage(const Image *image,const double degrees,ExceptionInfo *exception)"
+    },
+    {
+      "file": "MagickCore/shear.c",
+      "line": "1277-1285",
+      "code": "case RIGHT: p+=(ptrdiff_t) width*GetPixelChannels(image); q=p+step*(ssize_t) GetPixelChannels(image); for(i=0;i<width;i++){ p-=..; q-=..; if((size_t)(x_offset+width+step-i) > image->columns) continue; ... }"
+    },
+    {
+      "file": "MagickCore/shear.c",
+      "line": "1296-1300",
+      "code": "q-=GetPixelChannels(image); SetPixelViaPixelInfo(image,&destination,q); for(i=0;i<(step-1);i++){ q-=GetPixelChannels(image); SetPixelViaPixelInfo(image,&background,q); }"
+    }
+  ],
+  "preconditions": [
+    "An attacker supplies a crafted image and it is processed with a rotation or shear operation (-rotate / -shear / ShearRotateImage) at an angle whose per-row shear displacement `step` exceeds the available destination space `columns - x_offset - width`",
+    "The border computed by ShearRotateImage (bounds.x, which the same commit also fixes) is under-sized for the chosen dimensions/angle, so XShearImage is reached with an insufficient right-side padding",
+    "No privilege required: rotating/shearing a user-supplied image is a routine, unauthenticated operation in ImageMagick deployments (server-side image pipelines, CMS, CLI `magick`/`convert`)"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "1360d45eeee6ce2e6f7a895911ffb7485c0c1a70",
+    "vulnerable_version": "ImageMagick 7.1.2-35 (2026-10-31) and all earlier releases; also master before 1360d45",
+    "fixed_version": "unreleased on master only (1360d45, merged 2026-11-13); no release ships it (7.1.2-35 remains the newest tag)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Differential against the verbatim-extracted XShearImage 'RIGHT' pixel-transfer loop (MagickCore/shear.c @ 1360d45~1). VULNERABLE: with columns=32,channels=4,x_offset=4,width=16,step=30 the trailing background fill writes columns [4..33]; columns 32 and 33 (8 Quantums) land past the 32-column pixel row and clobber the canary guard placed immediately after it (canary[0..7] overwritten with background/destination values). FIXED (upstream 1360d45): the up-front guard `if (step > columns - x_offset - width) break;` skips the row, no write reaches the canary. Marker printed: MAGICKOVERRUN-OK.",
+    "real_exploit": {
+      "target": "ImageMagick MagickCore/shear.c — the actual XShearImage() 'RIGHT' (right-to-left) pixel-transfer loop, extracted VERBATIM from commit 1360d45~1 (vendored under vendor/shear.c); the memory-safety-relevant pointer arithmetic, the insufficient in-loop guard, and the unguarded trailing background-fill writes are byte-for-byte identical to upstream",
+      "driver": "exploit.c",
+      "backend": "the real vulnerable XShearImage loop compiled with zig cc, driven against a synthetic pixel row (32 columns x 4 channels of uint16 Quantums) followed by a contiguous canary guard region that models the heap memory immediately past the last row of the pixel cache",
+      "marker": "MAGICKOVERRUN-OK",
+      "demonstrated": "The pre-fix loop writes 8 Quantums (2 pixels) past the end of the pixel row, clobbering the canary (out-of-bounds WRITE, CWE-787). The same loop compiled with the upstream fix (1360d45's `if (step > columns - x_offset - width) break;` guard) skips the row entirely and leaves the canary intact. Impact demonstrated = attacker-controlled out-of-bounds write in the rotate/shear path that corrupts memory beyond the intended row/column boundary (adjacent pixel-cache rows/columns; and, for YShearImage's contiguous 1xrows column nexus buffer and the extreme-corner geometry, past the buffer allocation) — in ImageMagick's memory-unsafe C codebase the standard precondition for code execution."
+    },
+    "notes": "No public CVE/GHSA number is published yet, but the fix commit references GitHub Security Advisory GHSA-8xm2-q8hq-m68q (ImageMagick maintainer Dirk Lemstra, 2026-11-13, title 'Fixed possible out of bounds write in ShearRotateImage'). The fix is only on master; the newest release 7.1.2-35 (2026-10-31) predates it, so every released ImageMagick is still vulnerable. ShearRotateImage is the core of ImageMagick's `-rotate`/`-shear` (non-90-degree rotations), one of the most common image operations. The same commit also corrects the bounds.x border computation in ShearRotateImage (the geometry that can leave the right-side padding too small, making `step > columns - x_offset - width` reachable from a real rotate), and applies the analogous guard to YShearImage() 'DOWN' (bottom-to-top)."
+  }
+}
