@@ -1,0 +1,63 @@
+{
+  "id": "FfmpegOverrun",
+  "repo": "FFmpeg/FFmpeg",
+  "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "libavfilter/af_anlmdn.c",
+    "line": 277,
+    "code": "out = ff_get_audio_buffer(outlink, in->nb_samples);\n// output frame sized to the SHORT frame length (nb_samples < H)"
+  },
+  "critical_operation": {
+    "file": "libavfilter/af_anlmdn.c",
+    "line": 222,
+    "code": "for (int i = S; i < H + S; i++) {\n    dst[i - S] = P / Q; // writes H samples into an in->nb_samples buffer"
+  },
+  "trace": [
+    {
+      "file": "libavfilter/af_anlmdn.c",
+      "line": "305",
+      "code": "ret = ff_inlink_consume_samples(inlink, s->H, s->H, &in);  // consumes H samples per frame; at EOF returns the remaining short frame"
+    },
+    {
+      "file": "libavfilter/af_anlmdn.c",
+      "line": "277",
+      "code": "out = ff_get_audio_buffer(outlink, in->nb_samples);  // buffer sized to the short frame (nb_samples < H)"
+    },
+    {
+      "file": "libavfilter/af_anlmdn.c",
+      "line": "222",
+      "code": "for (int i = S; i < H + S; i++) {  // pre-fix: loops H times regardless of in->nb_samples"
+    },
+    {
+      "file": "libavfilter/af_anlmdn.c",
+      "line": "258-260",
+      "code": "dst[i - S] = P / Q;  // writes dst[0 .. H-1], i.e. up to (H - nb_samples)*4 bytes past the allocation"
+    }
+  ],
+  "preconditions": [
+    "The anlmdn filter is applied (ffmpeg -af anlmdn, or a libavfilter graph using the filter)",
+    "The input audio stream length (in samples) is not a multiple of the filter block size H = 2K+1 (default patch=2000us; at 44100 Hz K=88, H=177), so the final frame is short",
+    "No special privilege is required: processing a crafted WAV/audio file is sufficient"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "2e70a189b9025158d9db04abf6acd6692e87c797",
+    "vulnerable_version": "FFmpeg <= n9.0.2 and <= n8.1.3 (latest releases as of 2026-11); the vulnerable loop `for (int i = S; i < H + S; i++)` is present since the filter was added (2019, FFmpeg 4.2)",
+    "fixed_version": "unreleased on master (2e70a189, 2026-11-06); NOT in any release branch as of 2026-11-15",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Driving the REAL FFmpeg 9.0.2 binary (compiled from source with musl-gcc, allocator instrumented with a canary redzone because ASAN is unavailable): a 178-sample 44.1kHz WAV (H+1, final frame = 1 sample) processed through `-af anlmdn` triggers `AIVR-CANARY: HEAP-BUFFER-OVERFLOW detected in av_malloc buffer (size=136 bytes): redzone byte 0 == 0x00 (expected 0xa5)` and aborts (exit 134/SIGABRT). CONTROL (177-sample WAV, multiple of H) exits 0. The FIXED binary (one-line loop-bound change) processes the same 178-sample input with exit 0, proving the overflow is the vulnerable loop. Marker: FFMPEGOVERRUN-OK.",
+    "real_exploit": {
+      "target": "FFmpeg 9.0.2 (the real libavfilter/af_anlmdn.c filter_channel loop), compiled from upstream source at tag n9.0.2 with musl-gcc; the vulnerable code is byte-for-byte upstream, only av_malloc is instrumented with a canary redzone for deterministic OOB-write detection",
+      "driver": "run.sh",
+      "backend": "the real ffmpeg binary (ffmpeg-vuln) decoding a crafted WAV and running the anlmdn filter; gen_wav.py crafts the 178-sample (H+1) input whose final 1-sample frame overflows by 704 bytes",
+      "marker": "HEAP-BUFFER-OVERFLOW",
+      "demonstrated": "ffmpeg-vuln (n9.0.2) aborts with the canary marker on the 178-sample input (short final frame -> 704-byte out-of-bounds write past a 4-byte float buffer), while the 177-sample control exits cleanly; ffmpeg-fixed (same source + the one-line `i < in->nb_samples + S` fix) processes the identical 178-sample input with exit 0. Demonstrated impact = deterministic heap corruption / process abort (DoS); the write is bounded and carries denoised float data (I:H per CWE-787, C:N because the overflow writes rather than reads)."
+    },
+    "notes": "No CVE assigned as of 2026-11-15; upstream tracks it under FFmpeg ticket uQUc1sfqWcj8, reported by Secbuddy / Tencent Keen Security Lab and fixed by Michael Niedermayer on 2026-11-06. The fix commit message states 'Fixes: heap-buffer-overflow' and 'Heap out of array write Replicated through UnModified FFmpeg with ASAN'. Fix is on master only; the n9.0.2 and n8.1.3 release branches still carry the vulnerable loop."
+  }
+}

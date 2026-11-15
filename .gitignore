@@ -37,3 +37,7 @@ flv_null_deref
 # compiled PoC binaries (this run)
 frr_encap_uaf
 guac_ssh_agent_oob
+
+# FFmpeg anlmdn PoC (FfmpegOverrun) prebuilt binaries — rebuild via build.sh
+ffmpeg-vuln
+ffmpeg-fixed
