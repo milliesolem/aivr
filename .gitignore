@@ -41,3 +41,8 @@ guac_ssh_agent_oob
 # FFmpeg anlmdn PoC (FfmpegOverrun) prebuilt binaries — rebuild via build.sh
 ffmpeg-vuln
 ffmpeg-fixed
+
+# compiled PoC binaries (this run)
+mstp_cobs_poc
+zstd-vuln
+zstd-fixed

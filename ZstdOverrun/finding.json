@@ -1,0 +1,73 @@
+{
+  "id": "ZstdOverrun",
+  "repo": "facebook/zstd",
+  "commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/compress/zstd_compress.c",
+    "line": 4227,
+    "code": "ZSTD_deriveBlockSplitsHelper(splits, startIdx, midIdx, zc, origSeqStore);\n// left-child recursion: can fill the 196-entry split budget before the ancestor writes its own split position"
+  },
+  "critical_operation": {
+    "file": "lib/compress/zstd_compress.c",
+    "line": 4228,
+    "code": "splits->splitLocations[splits->idx] = (U32)midIdx;\n// OOB write: splits->idx has already reached ZSTD_MAX_NB_BLOCK_SPLITS (196), so this writes past partitions[]"
+  },
+  "trace": [
+    {
+      "file": "lib/compress/zstd_compress.c",
+      "line": "4239",
+      "code": "static size_t ZSTD_deriveBlockSplits(ZSTD_CCtx* zc, U32 partitions[], U32 nbSeq)  // splits.splitLocations = partitions; splits.idx = 0;"
+    },
+    {
+      "file": "lib/compress/zstd_compress.c",
+      "line": "4210",
+      "code": "if (endIdx - startIdx < MIN_SEQUENCES_BLOCK_SPLITTING || splits->idx >= ZSTD_MAX_NB_BLOCK_SPLITS) { return; }  // budget checked only on function ENTRY"
+    },
+    {
+      "file": "lib/compress/zstd_compress.c",
+      "line": "4227",
+      "code": "ZSTD_deriveBlockSplitsHelper(splits, startIdx, midIdx, zc, origSeqStore);  // left recursion increments splits->idx up to 196"
+    },
+    {
+      "file": "lib/compress/zstd_compress.c",
+      "line": "4228",
+      "code": "splits->splitLocations[splits->idx] = (U32)midIdx;  // writes partitions[196] and beyond — past the 196-entry array"
+    },
+    {
+      "file": "lib/compress/zstd_compress.c",
+      "line": "4250",
+      "code": "splits.splitLocations[splits.idx] = nbSeq;  // terminator write also lands out of bounds"
+    },
+    {
+      "file": "lib/compress/zstd_compress_internal.h",
+      "line": "468",
+      "code": "U32 partitions[ZSTD_MAX_NB_BLOCK_SPLITS];  // 196 entries; the adjacent entropyMetadata field is what gets overwritten"
+    }
+  ],
+  "preconditions": [
+    "The application compresses attacker-influenced data with the block-level external sequence producer API (ZSTD_registerSequenceProducer + ZSTD_compress2), with ZSTD_c_splitAfterSequences enabled and ZSTD_c_validateSequences == 1 (the offload / hardware-accelerated / custom sequence-generator path; the CLI and default compress() paths do not use it)",
+    "The sequence stream contains enough small (3-byte) matches over a ~128 KiB block that the recursive block splitter makes more than ZSTD_MAX_NB_BLOCK_SPLITS (196) dyadic splits — 38,400 valid 3-byte matches reproduce this deterministically",
+    "No special privilege is required: it is an out-of-bounds array write within the (heap-allocated) compression context — it overwrites the adjacent entropyMetadata field, not arbitrary heap"
+  ],
+  "severity_claim": "low",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "974238ca9e5e05fc0241aa09e10b4837d77cf78e",
+    "vulnerable_version": "zstd <= 1.5.7 (latest release, 2025-02-18); the missing re-check and the undersized partitions[] array are present since the block splitter landed (v1.5.6, 2024-03)",
+    "fixed_version": "unreleased on master (974238ca, 2026-11-10); NOT in any release tag (latest release v1.5.7 predates it by ~21 months)",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Compiling the REAL libzstd (facebook/zstd) from source with musl-gcc, with only a canary field added after partitions[] in ZSTD_blockSplitCtx: driving ZSTD_compress2() with a 38,400-sequence external sequence producer over a 128,000-byte all-zero source, the v1.5.7 binary clobbers canary[0..3] (values 0x7788/0x79e0/0x8340/0x9600 — the midIdx split positions and the nbSeq=38400 terminator) and prints ZSTDOVERRUN-CANARY-CLOBBERED (exit 1), while the 974238ca binary leaves the canary intact and prints ZSTDOVERRUN-CANARY-INTACT (exit 0). Marker: ZSTDOVERRUN-CANARY-CLOBBERED.",
+    "real_exploit": {
+      "target": "libzstd (facebook/zstd) v1.5.7 — the real lib/compress/zstd_compress.c ZSTD_deriveBlockSplitsHelper() recursive block splitter, compiled from upstream source at tag v1.5.7 with musl-gcc; the only change from upstream is an 8-word canary field placed immediately after partitions[] in ZSTD_blockSplitCtx for deterministic OOB-write detection (ASAN unavailable)",
+      "driver": "driver.c",
+      "backend": "the real zstd-vuln (v1.5.7) and zstd-fixed (974238ca) static binaries, each built from the real library + driver.c; the driver registers a crafted external sequence producer and drives ZSTD_compress2()",
+      "marker": "ZSTDOVERRUN-CANARY-CLOBBERED",
+      "demonstrated": "zstd-vuln (v1.5.7) writes four U32 values past partitions[196] into the canary (0x7788/0x79e0/0x8340/0x9600 = the midIdx split positions and the nbSeq=38400 terminator) and exits 1 with ZSTDOVERRUN-CANARY-CLOBBERED; zstd-fixed (974238ca) leaves the canary untouched and exits 0 with ZSTDOVERRUN-CANARY-INTACT. In the uninstrumented build the same four words overwrite the ZSTD_entropyCTablesMetadata_t entropyMetadata field that immediately follows partitions[], i.e. silent corruption of the compression context (CWE-787)."
+    },
+    "notes": "No CVE/GHSA as of 2026-11-15; upstream fixed it in 974238ca (2026-11-10, 'Fix block splitter partition bounds') with no advisory. The trigger is the block-level external-sequence API (ZSTD_registerSequenceProducer), used by offload/hardware-accelerated/custom sequence producers (contrib/externalSequenceProducer); the CLI (--patch-from) and the default ZSTD_compress()/decompress paths do NOT use this API, and the internal match-finder path is not known to reach 196 splits. The block splitter itself is also auto-enabled at btopt+ strategy with windowLog>=17, but the >196-split exhaustion demonstrated here needs the external-sequence path. Honest impact: a bounded intra-struct array OOB write (4 U32s) that overwrites the adjacent ZSTD_entropyCTablesMetadata_t entropyMetadata field of the same heap-allocated ZSTD_CCtx — NOT a heap overflow past the allocation, NOT a demonstrated RCE/crash/info-leak; the round-trip still succeeds so the corruption is 'silent'. Rated LOW 3.3 (AV:L, requires compressing crafted data through the sequence-producer path, integrity-only)."
+  }
+}
