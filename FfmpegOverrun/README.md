@@ -9,18 +9,17 @@ heap buffer — up to `(H-1) * 4` bytes (≈700 bytes at default settings, 44.1 
 
 | Product + version            | CVSS 3.1                                    | CWE                    |
 |------------------------------|---------------------------------------------|------------------------|
-| FFmpeg ≤ n9.0.2 / n8.1.3 (latest releases, 2026-11) | **7.1 HIGH** — `AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H` | CWE-787 (out-of-bounds write) |
+| FFmpeg ≤ n9.0.2 / n8.1.3 (latest releases, 2026-11) | **5.5 MEDIUM** — `AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H` | CWE-787 (out-of-bounds write) |
 
-> Note on severity: this is a genuine heap OOB **write** (memory corruption) found
-> by Tencent Keen Security Lab / Secbuddy and confirmed by FFmpeg with ASAN
-> ("Heap out of array write Replicated through UnModified FFmpeg with ASAN").
-> The demonstrated, deterministic impact is a process abort (DoS); the write is
-> bounded and carries denoised `float` data rather than fully attacker-chosen
-> bytes, so C:N is honest (the overflow writes, it does not read/leak) and I:H is
-> the *potential* heap-corruption consequence rather than a demonstrated precise
-> arbitrary write. A network transcoding service that applies `anlmdn` to
-> untrusted uploads would be `AV:N/UI:N` = 9.1 CRITICAL; the local
-> file-processing model below is 7.1.
+> Note on severity (critic downgrade applied): this is a genuine heap OOB **write**
+> found by Tencent Keen Security Lab / Secbuddy and confirmed by FFmpeg with ASAN
+> ("Heap out of array write Replicated through UnModified FFmpeg with ASAN"). The
+> **demonstrated, deterministic impact is a process abort (DoS, A:H)**. The write is
+> bounded (~700 B) and carries denoised `float` data rather than attacker-chosen
+> bytes, so `I:H` (arbitrary heap-corruption → code-exec) is NOT demonstrated and the
+> honest rating is **MEDIUM 5.5** (matching the LeveldbOverrun/GuacOverrun precedent).
+> A network transcoding service applying `anlmdn` to untrusted uploads would raise the
+> attack surface (`AV:N/UI:N`) but the local file-processing model below is 5.5.
 
 ## Fix commit
 
