@@ -1,0 +1,73 @@
+{
+  "id": "CurlEcho",
+  "repo": "curl/curl",
+  "commit": "12938b611c5c0e99b38ebfdbea5e13a50bd4db24",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "lib/http.c",
+    "line": 4115,
+    "code": "if((0x0a == *hd) || (0x0d == *hd)) {"
+  },
+  "critical_operation": {
+    "file": "lib/http.c",
+    "line": 4121,
+    "code": "result = curlx_dyn_addn(&last_header, hd, hdlen);"
+  },
+  "trace": [
+    {
+      "file": "lib/http.c",
+      "line": 4115,
+      "code": "if((0x0a == *hd) || (0x0d == *hd)) {   // end-of-headers decided from the FIRST byte only; \"\\rX-Bad: a<NUL>b\\r\\n\" passes"
+    },
+    {
+      "file": "lib/http.c",
+      "line": 4121,
+      "code": "curlx_dyn_addn(&last_header, hd, hdlen);   // the ENTIRE line (post-CR payload, NUL, bare CR) is copied"
+    },
+    {
+      "file": "lib/http.c",
+      "line": 4125,
+      "code": "result = http_on_response(data, curlx_dyn_ptr(&last_header), curlx_dyn_len(&last_header), ...);"
+    },
+    {
+      "file": "lib/http.c",
+      "line": 4097,
+      "code": "http_write_header(data, last_hd, last_hd_len);   // out: label — writes the terminator line to CLIENTWRITE_HEADER WITHOUT Curl_verify_header()"
+    },
+    {
+      "file": "lib/http.c",
+      "line": 4247,
+      "code": "result = Curl_verify_header(data, hd, hdlen);   // ordinary headers go through this; NUL/spurious-CR -> CURLE_WEIRD_SERVER_REPLY"
+    },
+    {
+      "file": "lib/http.c",
+      "line": 4115,
+      "code": "FIX (3f68448): require the terminator to be exactly \"\\n\" (len 1) or \"\\r\\n\" (len 2), else return CURLE_WEIRD_SERVER_REPLY"
+    }
+  ],
+  "preconditions": [
+    "the attacker controls HTTP/1.1 (or RTSP) response bytes — a malicious/compromised origin, a MITM inside a trusted CA, or a hostile origin reached through SSRF",
+    "the victim consumes headers via CURLOPT_HEADERFUNCTION, `curl -D <file>`, or `curl -i` (documented header sinks)",
+    "no non-default option, no --insecure, no privileged role required"
+  ],
+  "severity_claim": "low",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "3f684481b82e3f7ccbf61f79afb96fb4f0c67b60",
+    "vulnerable_version": "curl <= 8.23.0 (latest release 2026-10-14); the bug is live in 8.23.0 and all prior releases",
+    "fixed_version": "master @ 3f68448 (2026-11-10, \"http: reject malformed header terminators\") — NOT yet in any release",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "The C reproducer ports the line-splitting (memchr '\\n'), the vulnerable terminator classification (first byte '\\n'|'\\r'), the fixed check (exact '\\n' or '\\r\\n'), and Curl_verify_header's NUL/CR rejection, then drives a crafted HTTP/1.1 response. Vulnerable: the CR-prefixed terminator line \"\\rX-Bad: a\\0b\\r\\n\" is classified as end-of-headers and the whole 13 bytes are written to the header sink (hex 0d582d4261643a206100620d0a — byte-identical to the reporter's real-libcurl capture) while the transfer returns 0. Fixed: same input returns 8 (CURLE_WEIRD_SERVER_REPLY) with no payload delivered. Negative control (NUL in a normal header) is rejected by both. Marker: CURLECHO-CONFIRMED.",
+    "real_exploit": {
+      "target": "curl 8.23.0 lib/http.c http_rw_hd() / http_on_response() — the terminator-line path that skips Curl_verify_header(), ported verbatim; the reporter (christos-cantina-security, issue #23859) confirmed the identical bytes against a real 8.23.1-DEV libcurl build with a loopback TCP server (nothing mocked)",
+      "driver": "poc.c",
+      "backend": "zig cc (C99, stdlib) — faithful port of the line-splitter, the vulnerable vs fixed terminator classification, and the NUL/CR verify_header rejection; the crafted response's injected bytes are delivered to a modeled header sink exactly as http_write_header -> CLIENTWRITE_HEADER does",
+      "marker": "CURLECHO-CONFIRMED",
+      "demonstrated": "A malicious origin sends \"HTTP/1.1 200 OK\\r\\n\" + \"\\rX-Bad: a\\0b\\r\\n\"; the vulnerable parser treats the CR-prefixed line as the end-of-headers terminator and writes the full 13 bytes (leading 0d, embedded 00) to the header sink with transfer result 0 (CURLE_OK) — bypassing the NUL/CR rejection that ordinary headers and chunked trailers receive. The fixed parser rejects the line with CURLE_WEIRD_SERVER_REPLY (8) and delivers nothing. A NUL in a normal header line is rejected by both. CWE-436/116 header-validation bypass."
+    },
+    "notes": "Honest impact is a parser-validation / hardening bypass: a server that already controls the response can push NUL / bare-CR / arbitrary payload through the end-of-headers terminator line into CURLOPT_HEADERFUNCTION / -D / -i on a transfer that still returns CURLE_OK. curl itself suffers no confidentiality/integrity/availability loss — it faithfully delivers bytes to a documented, length-delimited, non-NUL-terminated sink; no memory-safety, credential-leak, cross-origin, or request-smuggling impact (reporter verified ASan-clean, byte-identical output), and curl_easy_header() is unaffected (the headers collector drops CR/LF-prefixed lines). Concrete harm requires a downstream consumer that treats the buffer as a C string or trusts the separator line as a record boundary (hence AC:H and LOW severity). This bypasses the invariant introduced by curl commits 526e0ef4cb (reject NUL in headers) and c3c2cfb65d (reject spurious CR). Reported by christos-cantina-security (issue #23859); fixed on master 2026-11-10 (3f68448), unreleased (latest release 8.23.0, 2026-10-14)."
+  }
+}

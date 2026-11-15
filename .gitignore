@@ -46,3 +46,7 @@ ffmpeg-fixed
 mstp_cobs_poc
 zstd-vuln
 zstd-fixed
+
+# compiled PoC binaries + staging dirs (rebuilt by run.sh)
+poc
+assimp_stage/
