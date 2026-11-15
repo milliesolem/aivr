@@ -1,0 +1,73 @@
+{
+  "id": "JqMimic",
+  "repo": "jqlang/jq",
+  "commit": "fbee8f48bac154aeb6edfbd79792181ac19914a3",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/main.c",
+    "line": 661,
+    "code": "jq_util_input_set_parser(input_state, jv_parser_new(parser_flags), (options & SLURP) ? 1 : 0);"
+  },
+  "critical_operation": {
+    "file": "src/jv_parse.c",
+    "line": 536,
+    "code": "p->tokenbuf[p->tokenpos] = 0;"
+  },
+  "trace": [
+    {
+      "file": "src/jv_parse.c",
+      "line": "580-581",
+      "code": "default: return LITERAL;   // raw 0x00 is classified as a literal char (fix adds case '\\0': return INVALID)"
+    },
+    {
+      "file": "src/jv_parse.c",
+      "line": "423-433",
+      "code": "tokenadd(p, ch) appends the NUL into tokenbuf together with the following digits"
+    },
+    {
+      "file": "src/jv_parse.c",
+      "line": 536,
+      "code": "p->tokenbuf[p->tokenpos] = 0;   // buffer read back as a C string: bytes after the embedded NUL are invisible"
+    },
+    {
+      "file": "src/jv_parse.c",
+      "line": 537,
+      "code": "jv_number_with_literal(p->tokenbuf)   // \"100\\0\" + \"999\" parses as 100, no 'Invalid numeric literal'"
+    },
+    {
+      "file": "src/jv_parse.c",
+      "line": "511-552",
+      "code": "check_literal() returns success and tokenpos is reset, so the trailing digits are silently dropped"
+    },
+    {
+      "file": "src/jv_parse.c",
+      "line": 566,
+      "code": "FIX (fbee8f4): case '\\0': return INVALID;  -> 'Invalid character at line 1, column 3' for 12\\0003"
+    }
+  ],
+  "preconditions": [
+    "the victim consumes attacker-influenced JSON through jq (shell/CI/automation gate, e.g. jq -e '.amount <= 100')",
+    "a second consumer of the same raw bytes tolerates or strips NUL characters (tr -d '\\0', iconv, an ETL/text loader, a C-string reader)",
+    "the payload uses a raw 0x00 byte inside a numeric token; JSON-escaped \\u0000 inside strings is correctly rejected"
+  ],
+  "severity_claim": "low",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "fbee8f48bac154aeb6edfbd79792181ac19914a3",
+    "vulnerable_version": "jq 1.8.2 (latest release, 2026-06-20); bug is long-standing (upstream regression test cites issue #3110)",
+    "fixed_version": "master @ fbee8f48 (2026-08-23, PR #3606 'Reject raw NUL bytes in the parser instead of silently truncating tokens') -- NOT yet in any release",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Against the official jq 1.8.2 static Linux amd64 binary (SHA-256 b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f): printf '100\\000999' | ./jq-1.8.2 . prints 100 and exits 0 (no parse error), and {\"amount\":100\\000999} yields .amount == 100 with exit 0. The modelled gate 'jq -e .amount <= 100' exits 0 (APPROVED) while the NUL-stripped ledger import of the same bytes reads amount 100999 -- a 100x over-limit record passes the jq gate. Control: the upstream fix's rule (classify(NUL) -> INVALID) reports 'Invalid character' for the same bytes, and the well-formed negative control {\"amount\":100} agrees (jq=100, ledger=100). Marker: JQMIMIC-CONFIRMED.",
+    "real_exploit": {
+      "target": "jq 1.8.2 released binary, JSON scanner src/jv_parse.c classify()/check_literal(); the bundled official jq-linux-amd64 build is executed directly on the crafted bytes",
+      "driver": "poc.py",
+      "backend": "official jq 1.8.2 static Linux amd64 release binary (bundled, SHA-256 pinned) + a modelled two-stage victim pipeline (jq gate + NUL-tolerant ledger import)",
+      "marker": "JQMIMIC-CONFIRMED",
+      "demonstrated": "The real released jq accepts RFC 8259-invalid JSON containing a raw NUL inside a numeric token and silently truncates it (100\\000999 -> 100, exit 0), while a NUL-stripping consumer of the same bytes reads 100999; a jq-based limit gate therefore approves an over-limit value. The fixed classify() rule rejects the same bytes with 'Invalid character'. CWE-436 interpretation conflict / CWE-170 improper NUL termination."
+    },
+    "notes": "Honest impact: this is a parser-differential / input-validation bug, not memory corruption. jq alone loses data silently (the trailing bytes never reach the output), but a real integrity impact requires the documented second consumer that tolerates NULs; hence AC:H and LOW severity. Raw NULs inside JSON strings are already rejected by jq's control-character check -- only numeric literals traverse the NUL-terminated check_literal() path. Fixed only on master (fbee8f4, 2026-08-23); latest release 1.8.2 predates it, so every released jq is affected."
+  }
+}
