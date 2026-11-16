@@ -50,3 +50,11 @@ zstd-fixed
 # compiled PoC binaries + staging dirs (rebuilt by run.sh)
 poc
 assimp_stage/
+
+# LuaRabbit build artifacts
+LuaRabbit/bin/
+LuaRabbit/build/
+
+# CVE-2026-99288 build artifacts (rebuilt by run.sh)
+CVE-2026-99288/noisytcp_vuln
+CVE-2026-99288/noisytcp_fixed

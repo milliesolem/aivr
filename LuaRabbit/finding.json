@@ -1,0 +1,57 @@
+{
+  "id": "LuaRabbit",
+  "verdict": "confirmed",
+  "repo": "redis/redis",
+  "commit": "124bc7ef45e2baa63afbec3a956fb6c41358c450",
+  "entry_point": {
+    "file": "deps/lua/src/lstrlib.c",
+    "line": 398,
+    "code": "static const char *match (MatchState *ms, const char *s, const char *p) {"
+  },
+  "critical_operation": {
+    "file": "deps/lua/src/lstrlib.c",
+    "line": 404,
+    "code": "if (ms->matchdepth-- == 0)"
+  },
+  "trace": [
+    {
+      "file": "deps/lua/src/lstrlib.c",
+      "line": "405",
+      "code": "luaL_error(ms->L, \"pattern too complex\");  /* MAXCCALLS=200 depth limit added by 124bc7e */"
+    },
+    {
+      "file": "deps/lua/src/lstrlib.c",
+      "line": "490",
+      "code": "match(ms, s + 1, p + 2)  /* one C frame per input character for each .? item; unbounded before the fix */"
+    },
+    {
+      "file": "deps/lua/src/lstrlib.c",
+      "line": "556",
+      "code": "static int str_find_aux (lua_State *L, int find)  /* string.find/string.match entry point */"
+    }
+  ],
+  "preconditions": [
+    "attacker can run a Lua script on the server (EVAL/EVALSHA/FUNCTION) or an application passes attacker-controlled patterns to Lua string.find/string.match",
+    "pattern and subject are large (~1 MiB each) so the recursive match() exhausts the 8 MiB C stack"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "124bc7ef45e2baa63afbec3a956fb6c41358c450",
+    "vulnerable_version": "redis unstable before 124bc7e (parent 63cf48ce); every stable release checked (8.10.3, 8.4.4, 8.0.6, 7.4.12) still ships the unbounded match()",
+    "fixed_version": "124bc7e (2026-11-09, unstable); shipped in 8.12-rc3 (2026-11-12); not in any stable release at disclosure",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Real redis-server built from source at 63cf48ce dies with SIGSEGV when a client sends EVAL \"return string.find(string.rep('a', 2^20), string.rep('.?', 2^20))\" 0. The EVAL is sent as ACL user \"luauser\" (+eval +ping only): its SHUTDOWN NOSAVE is refused with -NOPERM, yet its EVAL still kills the process. The build at 124bc7e replies '-ERR user_script:1: pattern too complex' and stays alive (PING -> +PONG).",
+    "real_exploit": {
+      "target": "redis/redis bundled Lua 5.1 deps/lua/src/lstrlib.c match() recursion, reached through EVAL",
+      "driver": "poc.py",
+      "backend": "two real redis-server binaries built from upstream source at commit 63cf48ce (vulnerable parent) and 124bc7e (fixed); the driver starts each server, creates the restricted ACL user, authenticates as it, proves SHUTDOWN is -NOPERM, sends the crafted EVAL over a real RESP/TCP connection, and checks the process exit status",
+      "marker": "LUARABBIT-CONFIRMED",
+      "demonstrated": "an ACL-restricted user holding only scripting rights (+eval +ping, SHUTDOWN denied with -NOPERM) crashes the server with SIGSEGV by exhausting the C stack in Lua match(), while the fixed server returns the Lua 'pattern too complex' error and continues serving - a remote denial of service that crosses a real privilege boundary"
+    },
+    "notes": "Fixed by porting Lua upstream's MAXCCALLS=200 match-depth limit; the fix is on unstable and in 8.12-rc3, absent from stable 8.10.3/8.4.4/8.0.6/7.4.12. Requirement: a client with EVAL/EVALSHA/FUNCTION rights (a default no-auth server makes that every client, PR:N); the PoC demonstrates the narrower ACL-confined case, hence 6.5 / PR:L. Impact is availability only (process crash)."
+  }
+}
