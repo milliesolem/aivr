@@ -1,0 +1,43 @@
+{
+  "id": "RpcOverrun",
+  "verdict": "confirmed",
+  "repo": "grpc/grpc",
+  "commit": "634d87dcc2fa3ae854ae19e2da38354b4a497fa2",
+  "entry_point": {
+    "file": "src/core/load_balancing/rls/rls.cc",
+    "line": 1913,
+    "code": "bool EndpointsEqual("
+  },
+  "critical_operation": {
+    "file": "src/core/load_balancing/rls/rls.cc",
+    "line": 1926,
+    "code": "if (endpoint != e1_list[i++]) different = true;"
+  },
+  "trace": [
+    {"file": "src/core/load_balancing/rls/rls.cc", "line": "1959", "code": "bool update_child_policies ="},
+    {"file": "src/core/load_balancing/rls/rls.cc", "line": "1962", "code": "!EndpointsEqual(old_addresses, addresses_) || args.args != channel_args_;"},
+    {"file": "src/core/load_balancing/rls/rls.cc", "line": "1913", "code": "bool EndpointsEqual("},
+    {"file": "src/core/load_balancing/rls/rls.cc", "line": "1926", "code": "if (endpoint != e1_list[i++]) different = true;"}
+  ],
+  "preconditions": [
+    "victim gRPC client uses the rls_experimental load-balancing policy",
+    "attacker influences the RLS lookup result to grow the endpoint list across two consecutive lookups (malicious/compromised RLS server, DNS rebinding, or MITM)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:L",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "686404ca90192499b488ac6aace7b0095753afe2",
+    "vulnerable_version": "through v1.85.2 (all released versions)",
+    "fixed_version": "unreleased (master, merged 2026-11-02 in #43732)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "vulnerable loop dereferences e1_list[1] of a size-1 vector (canary_hit=TRUE); fixed loop bounds-checks i>=size first (canary_hit=false)",
+    "real_exploit": {
+      "target": "grpc/grpc src/core/load_balancing/rls/rls.cc EndpointsEqual() @ 634d87d (parent of fix 686404ca)",
+      "driver": "poc.cc",
+      "backend": "verbatim reproduction of the vulnerable loop (std::vector<EndpointAddresses> + ForEach) with a canary EndpointAddresses placed in the slot immediately after e1_list's single element",
+      "marker": "RPC-OVERRUN-OOB-READ-CONFIRMED",
+      "demonstrated": "the vulnerable loop reads past the end of a size-1 endpoint vector (index 1, hitting the canary) when the new endpoint list has more entries than the old; the fixed loop's in-loop bounds check (i >= e1_list.size()) prevents the read"
+    }
+  }
+}
