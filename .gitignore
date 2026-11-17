@@ -58,3 +58,6 @@ LuaRabbit/build/
 # CVE-2026-99288 build artifacts (rebuilt by run.sh)
 CVE-2026-99288/noisytcp_vuln
 CVE-2026-99288/noisytcp_fixed
+
+# FdbWormhole compiled binary (rebuilt by run.sh)
+FdbWormhole/exploit

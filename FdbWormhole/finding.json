@@ -1,0 +1,73 @@
+{
+  "id": "FdbWormhole",
+  "repo": "apple/foundationdb",
+  "commit": "f679ff94d724a9119aae0f6ddbd5543e8196aa14",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "fdbclient/BackupContainerFileSystem.cpp",
+    "line": 1410,
+    "code": "static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {"
+  },
+  "critical_operation": {
+    "file": "fdbbackup/FileDecoder.cpp",
+    "line": 525,
+    "code": "lfd = open(file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);"
+  },
+  "trace": [
+    {
+      "file": "fdbclient/BackupContainerFileSystem.cpp",
+      "line": "1410",
+      "code": "static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {"
+    },
+    {
+      "file": "fdbclient/BackupContainerFileSystem.cpp",
+      "line": "1411",
+      "code": "std::string name = fileNameOnly(path);"
+    },
+    {
+      "file": "fdbclient/BackupContainerFileSystem.cpp",
+      "line": "1413",
+      "code": "f.fileName = path;"
+    },
+    {
+      "file": "fdbbackup/FileDecoder.cpp",
+      "line": "517",
+      "code": "std::string dir = file.fileName;"
+    },
+    {
+      "file": "fdbbackup/FileDecoder.cpp",
+      "line": "522",
+      "code": "platform::createDirectory(path);"
+    },
+    {
+      "file": "fdbbackup/FileDecoder.cpp",
+      "line": "525",
+      "code": "lfd = open(file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);"
+    }
+  ],
+  "preconditions": [
+    "The victim (FoundationDB operator/analyst) runs fdbdecode --save (or fdbrestore) against a backup container the attacker controls or can inject files into (e.g. an S3/BlobStore bucket, a shared local directory, or a backup archive supplied for offline restore)",
+    "The backup container lists a range/log/snapshot file whose name contains one or more '..' path components before a valid file-name suffix (e.g. '../FDBWORMHOLE_PWNED/log,1,2,uid,1048576')",
+    "The running fdbdecode process has write permission at the traversal target (typically true for an operator restoring to their own machine)"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "414a6ec83442fa5dfec1402f47ee645b7fefdb90",
+    "vulnerable_version": "FoundationDB 8.0.0 (tagged 2026-10-01) and earlier 7.x",
+    "fixed_version": "main @ 414a6ec8 (merged 2026-10-26), backported to 7.4.10 (2026-11-16); NOT present in 8.0.0",
+    "proof_commands": [
+      "bash run.sh"
+    ],
+    "observed_result": "Vulnerable 8.0.0 pathToLogFile() validates only the last path component (fileNameOnly()) and stores the full attacker-controlled path in fileName, so fdbdecode --save's open(fileName, O_WRONLY|O_CREAT|O_TRUNC) writes '../FDBWORMHOLE_PWNED/log,1,2,0123456789abcdef,1048576' OUTSIDE the output directory (<sandbox>/FDBWORMHOLE_PWNED/...). Fixed main rejects the same path via listedPathIsContained() -> relativePathIsContained() (rejects absolute paths and any '..' component). Marker: PATH TRAVERSAL CONFIRMED (vulnerable) / BLOCKED (fixed).",
+    "real_exploit": {
+      "target": "apple/foundationdb — the REAL pathToLogFile/pathToRangeFile/fileNameOnly from fdbclient/BackupContainerFileSystem.cpp @ 8.0.0 and the REAL relativePathIsContained/listedPathIsContained/pathToLogFile from main @ 414a6ec8, transcribed VERBATIM, plus the REAL DecodeProgress::openFile() save path from fdbbackup/FileDecoder.cpp @ 8.0.0 (only FDB logging/StringRef plumbing is stubbed)",
+      "driver": "exploit.cpp",
+      "backend": "the verbatim vulnerable parser + the verbatim fdbdecode write path, driven against a real filesystem: an attacker-controlled '../ESCAPED/log,1,2,uid,1048576' name is accepted by the vulnerable pathToLogFile and the write lands outside the operator's output directory",
+      "marker": "PATH TRAVERSAL CONFIRMED",
+      "demonstrated": "A listed backup file name with a '..' component is accepted by the vulnerable pathToLogFile (8.0.0) and fdbdecode --save then performs platform::createDirectory() + open(O_WRONLY|O_CREAT|O_TRUNC) on that verbatim path, creating the file <sandbox>/FDBWORMHOLE_PWNED/log,1,2,0123456789abcdef,1048576 — OUTSIDE the intended output directory (arbitrary file write, CWE-22). The fixed parser rejects the identical name. A legitimate non-traversal name is still accepted by both, proving the fix does not over-block."
+    }
+  },
+  "notes": "0-day in the current 8.x release line: the fix was merged to main on 2026-10-26 and backported to the 7.4 LTS line (7.4.10, tagged 2026-11-16), but 8.0.0 (tagged 2026-10-01) still contains the vulnerable code — verified by grepping 8.0.0's BackupContainerFileSystem.cpp (f.fileName = path with no listedPathIsContained check). Same CWE-22 pattern affects pathToRangeFile(), pathToKeyspaceSnapshotFile() (backup listing), fetchCheckpointFile() (checkpoint fetch), the profiler output path, and BulkLoad's assertLocalFolderContained(). Commit 414a6ec8 (PR #14347) follows cda9a9ec (PR #14341). Classified as CWE-22 (path traversal) -> arbitrary file write, a 'zip-slip'-style bug for FDB backups."
+}
