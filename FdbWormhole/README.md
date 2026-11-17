@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Product / version** | [apple/foundationdb](https://github.com/apple/foundationdb) **8.0.0** (tagged 2026-10-01) and earlier 7.x |
-| **CVSS 3.1** | **8.1 HIGH** `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H` |
+| **CVSS 3.1** | **6.5 MEDIUM** `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N` |
 | **CWE** | CWE-22 (path traversal) → arbitrary file write (a "zip-slip" for FDB backups) |
 | **Fix** | [`414a6ec8`](https://github.com/apple/foundationdb/commit/414a6ec83442fa5dfec1402f47ee645b7fefdb90) (PR [#14347](https://github.com/apple/foundationdb/pull/14347), follows [#14341](https://github.com/apple/foundationdb/pull/14341)) |
 | **Release status** | merged to `main` 2026-10-26, backported to **7.4.10** (2026-11-16); **NOT in 8.0.0** — the current 8.x release is still vulnerable |
@@ -47,8 +47,8 @@ A listed name such as `logs/../../../../tmp/x/log,1,2,uid,1048576` therefore wri
 
 ## Exploit chain
 
-1. Attacker controls (or can inject files into) a backup container — an S3/BlobStore bucket,
-   a shared local directory, or a backup archive handed to an operator for offline restore.
+1. Attacker controls (or can inject files into) a backup container — an S3/BlobStore bucket or
+   an archive listing, where `/` and `..` are legal in a key/name.
 2. The container lists a file whose name has a valid log/range/snapshot suffix but a `..`
    prefix, e.g. `../FDBWORMHOLE_PWNED/log,1,2,0123456789abcdef,1048576`.
 3. The operator runs `fdbdecode --save` against the container.
@@ -79,3 +79,7 @@ output directory) and `BLOCKED` for the fixed `main` parser.
   from `main @ 414a6ec8`), with only the FDB logging/`StringRef` plumbing stubbed.
 - Verified against the real tree: `git grep` of `8.0.0` shows `f.fileName = path;` with no
   containment check, while `7.4.10` and `main` both carry `listedPathIsContained()`.
+- Honest severity (6.5 MEDIUM): the write is **filename-constrained** — the basename must
+  still parse as a `log`/`range`/`snapshot` name, so the attacker controls the traversal
+  directory and file bytes but cannot overwrite arbitrary-named critical files
+  (`authorized_keys`, `/etc/passwd`). Hence `C:N/I:H/A:N`; no total-availability mechanism.

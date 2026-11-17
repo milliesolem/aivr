@@ -46,12 +46,12 @@
     }
   ],
   "preconditions": [
-    "The victim (FoundationDB operator/analyst) runs fdbdecode --save (or fdbrestore) against a backup container the attacker controls or can inject files into (e.g. an S3/BlobStore bucket, a shared local directory, or a backup archive supplied for offline restore)",
+    "The victim (FoundationDB operator/analyst) runs fdbdecode --save (or fdbrestore) against a backup container the attacker controls or can inject files into (e.g. an S3/BlobStore bucket or an archive listing, where '/' and '..' are legal in a key/name; a plain local directory cannot list a literal '../' filename on POSIX)",
     "The backup container lists a range/log/snapshot file whose name contains one or more '..' path components before a valid file-name suffix (e.g. '../FDBWORMHOLE_PWNED/log,1,2,uid,1048576')",
     "The running fdbdecode process has write permission at the traversal target (typically true for an operator restoring to their own machine)"
   ],
-  "severity_claim": "high",
-  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H",
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N",
   "reachable_if_trusted_input": true,
   "evidence": {
     "fixed_commit": "414a6ec83442fa5dfec1402f47ee645b7fefdb90",
@@ -69,5 +69,5 @@
       "demonstrated": "A listed backup file name with a '..' component is accepted by the vulnerable pathToLogFile (8.0.0) and fdbdecode --save then performs platform::createDirectory() + open(O_WRONLY|O_CREAT|O_TRUNC) on that verbatim path, creating the file <sandbox>/FDBWORMHOLE_PWNED/log,1,2,0123456789abcdef,1048576 — OUTSIDE the intended output directory (arbitrary file write, CWE-22). The fixed parser rejects the identical name. A legitimate non-traversal name is still accepted by both, proving the fix does not over-block."
     }
   },
-  "notes": "0-day in the current 8.x release line: the fix was merged to main on 2026-10-26 and backported to the 7.4 LTS line (7.4.10, tagged 2026-11-16), but 8.0.0 (tagged 2026-10-01) still contains the vulnerable code — verified by grepping 8.0.0's BackupContainerFileSystem.cpp (f.fileName = path with no listedPathIsContained check). Same CWE-22 pattern affects pathToRangeFile(), pathToKeyspaceSnapshotFile() (backup listing), fetchCheckpointFile() (checkpoint fetch), the profiler output path, and BulkLoad's assertLocalFolderContained(). Commit 414a6ec8 (PR #14347) follows cda9a9ec (PR #14341). Classified as CWE-22 (path traversal) -> arbitrary file write, a 'zip-slip'-style bug for FDB backups."
+  "notes": "0-day in the current 8.x release line: the fix was merged to main on 2026-10-26 and backported to the 7.4 LTS line (7.4.10, tagged 2026-11-16), but 8.0.0 (tagged 2026-10-01) still contains the vulnerable code — verified by grepping 8.0.0's BackupContainerFileSystem.cpp (f.fileName = path with no listedPathIsContained check). Same CWE-22 pattern affects pathToRangeFile(), pathToKeyspaceSnapshotFile() (backup listing), fetchCheckpointFile() (checkpoint fetch), the profiler output path, and BulkLoad's assertLocalFolderContained(). Commit 414a6ec8 (PR #14347) follows cda9a9ec (PR #14341). Severity is honestly MEDIUM 6.5: the write is filename-constrained (the basename must parse as a log/range/snapshot name), so the attacker controls the traversal directory and file bytes but cannot overwrite arbitrary-named critical files like authorized_keys or /etc/passwd — hence C:N/I:H/A:N (no mechanism for total loss of availability). Primary vector is an attacker-controlled S3/BlobStore backup key (a plain local directory cannot list a literal '../' filename on POSIX)."
 }
