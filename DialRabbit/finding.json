@@ -1,0 +1,65 @@
+{
+  "id": "DialRabbit",
+  "repo": "google/libphonenumber",
+  "commit": "86ea33cee5c22ab7e23b3de368e7cc7fa439a2b7",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+    "line": 2138,
+    "code": "PhoneNumberUtil::ErrorType PhoneNumberUtil::Parse(const string& number_to_parse,"
+  },
+  "critical_operation": {
+    "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+    "line": 2216,
+    "code": "reg_exps_->rfc3966_domainname_pattern_->FullMatch("
+  },
+  "trace": [
+    {
+      "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+      "line": "2291",
+      "code": "BuildNationalNumberForParsing(number_to_parse, &national_number);  // ParseHelper"
+    },
+    {
+      "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+      "line": "2229",
+      "code": "if (!IsPhoneContextValid(phone_context)) {"
+    },
+    {
+      "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+      "line": "2203-2204",
+      "code": "bool PhoneNumberUtil::IsPhoneContextValid(const absl::optional<string> phone_context) const"
+    },
+    {
+      "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+      "line": "793-795",
+      "code": "rfc3966_domainlabel_(StrCat(\"[\", alphanum_, \"]+((\\\\-)*[\", alphanum_, \"])*\")), rfc3966_toplabel_(StrCat(\"[\", kValidAlphaInclUppercase, \"]+((\\\\-)*[\", alphanum_, \"])*\"))"
+    },
+    {
+      "file": "cpp/src/phonenumbers/phonenumberutil.cc",
+      "line": "848-849",
+      "code": "rfc3966_domainname_pattern_(regexp_factory_->CreateRegExp(StrCat(\"^(\", rfc3966_domainlabel_, \"\\\\.)*\", rfc3966_toplabel_, \"\\\\.?$\")))"
+    }
+  ],
+  "preconditions": [
+    "Victim application calls the libphonenumber C++ parser (PhoneNumberUtil::Parse / ParseAndKeepRawInput / any isValidNumber-style wrapper that routes through Parse) on attacker-controlled strings, as virtually every signup, SMS and phone-number-validation service does",
+    "The C++ library is built with its default regex backend, ICU (USE_ICU_REGEXP=ON is the CMake default)",
+    "Attacker supplies a tel: URI whose phone-context parameter is a long sequence of ambiguous domain labels failing at the end, e.g. tel:253-0000;phone-context=(aa.){30}aa!"
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "981600cc587fb87483ad294a61daa187afc64b2c",
+    "vulnerable_version": "all releases through v9.0.43 (86ea33c, 2026-11-04) and every earlier release",
+    "fixed_version": "unreleased (master only, merged 2026-11-06 in PR #4070)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "With the real ICU adapter + the v9.0.43 domainname pattern, FullMatch on (aa.){N}aa! grows exponentially: 0.6 ms (N=6), 5.3 ms (N=8), 96.6 ms (N=10), 597.9 ms (N=12), 6114.2 ms (N=14), and N=30 is still inside the matcher after 15000 ms (child killed). The upstream-fixed pattern rejects the same N=30 input in 0.015 ms.",
+    "real_exploit": {
+      "target": "google/libphonenumber v9.0.43 cpp/src/phonenumbers/phonenumberutil.cc:793-795,848-849 (rfc3966_domainname_pattern_) matched via src/phonenumbers/regexp_adapter_icu.cc",
+      "driver": "redos.cc",
+      "backend": "real project source: regexp_adapter_icu.cc + string_byte_sink.cc + default_logger.cc + logger.cc vendored verbatim from v9.0.43, compiled with zig cc against the ICU 78 regex engine that libphonenumber uses by default; the two pattern strings are reconstructed verbatim from phonenumberutil.cc:793-795 (vulnerable) and upstream commit 981600c (fixed)",
+      "marker": "PHONENUMBER-REDOS-CONFIRMED",
+      "demonstrated": "PhoneNumberUtil::IsPhoneContextValid() feeds the attacker-controlled phone-context of a tel: URI to rfc3966_domainname_pattern_->FullMatch(). With the v9.0.43 pattern the real ICU adapter exhibits exponential backtracking: N=30 labels keeps a worker thread inside FullMatch beyond 15 s, while the fixed pattern rejects the identical input in 0.015 ms. A single request therefore pins a server thread indefinitely; a handful of requests exhausts a worker pool."
+    }
+  }
+}

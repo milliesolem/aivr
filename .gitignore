@@ -61,3 +61,6 @@ CVE-2026-99288/noisytcp_fixed
 
 # FdbWormhole compiled binary (rebuilt by run.sh)
 FdbWormhole/exploit
+
+# DialRabbit compiled binary (rebuilt by run.sh)
+DialRabbit/redos

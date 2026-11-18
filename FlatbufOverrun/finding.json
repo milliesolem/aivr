@@ -1,0 +1,71 @@
+{
+  "id": "FlatbufOverrun",
+  "repo": "google/flatbuffers",
+  "commit": "03fffb25e2d777462b719cb4964249c30b19d58f",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/idl_parser.cpp",
+    "line": 4412,
+    "code": "bool Parser::Deserialize(const uint8_t* buf, const size_t size) {"
+  },
+  "critical_operation": {
+    "file": "src/idl_parser.cpp",
+    "line": 4132,
+    "code": "for (uoffset_t i = 0; i < of.size(); i++) indexes[of.Get(i)->id()] = i;"
+  },
+  "trace": [
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4412",
+      "code": "bool Parser::Deserialize(const uint8_t* buf, const size_t size) {"
+    },
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4429",
+      "code": ": reflection::GetSchema(buf);"
+    },
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4433",
+      "code": "bool Parser::Deserialize(const reflection::Schema* schema) {"
+    },
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4476",
+      "code": "if (!struct_def->Deserialize(*this, *it)) {"
+    },
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4124",
+      "code": "bool StructDef::Deserialize(Parser& parser, const reflection::Object* object) {"
+    },
+    {
+      "file": "src/idl_parser.cpp",
+      "line": "4132",
+      "code": "for (uoffset_t i = 0; i < of.size(); i++) indexes[of.Get(i)->id()] = i;"
+    }
+  ],
+  "preconditions": [
+    "The victim loads a FlatBuffers binary reflection schema (.bfbs) with the flatbuffers reflection API — either the flatc compiler (supply-chain / build-time), or any application using flatbuffers::Parser::Deserialize / reflection at runtime (e.g. a service that accepts schemas from clients).",
+    "The .bfbs carries a Field whose reflection `id` (reflection.fbs: `id:ushort;`) is greater than or equal to its parent Object's field count. `id` is a plain uint16 with no cross-check against the field vector length, so a structurally-valid buffer passes the flatbuffers Verifier unchanged.",
+    "The library is built with any standard optimizing configuration (the shipped default); the bug is the unguarded `indexes[of.Get(i)->id()] = i` write."
+  ],
+  "severity_claim": "high",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "8a12183c3bf2fc39a5c6c32307b81d947bc37e22",
+    "vulnerable_version": "every release through v25.12.19-2026-02-06 (95fda8c, 2026-02-06) and v25.12.19 (282dcb1) — the latest tagged releases",
+    "fixed_version": "unreleased (master only; the bounds check 8a12183 merged 2026-04-02 is not an ancestor of any release tag)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "poc.cc drives the vendored v25.12.19-2026-02-06 reflection parser (real src/idl_parser.cpp + reflection.cpp + util.cpp) through Parser::Deserialize on a structurally-valid .bfbs whose single field has id=1 (field count=1). The vulnerable loop writes indexes[1] one uoffset_t past the 4-byte heap vector, corrupting the redzone canary placed by poc.cc's instrumented allocator (0xcd -> 0x00 at byte +4). With id=0xFFFF the same write lands ~256 KiB past the buffer and the process dies with SIGSEGV. The fixed build (upstream 8a12183 applied) rejects the identical buffer with 'Field ID 1 exceeds field count 1' and performs no out-of-bounds write.",
+    "real_exploit": {
+      "target": "google/flatbuffers v25.12.19-2026-02-06 (commit 95fda8c) src/idl_parser.cpp:4132 StructDef::Deserialize",
+      "driver": "poc.cc",
+      "backend": "real project source vendored verbatim from tag v25.12.19-2026-02-06 (95fda8c): src/idl_parser.cpp, src/reflection.cpp, src/util.cpp, and include/flatbuffers/*.h, compiled with zig cc. poc.cc crafts a structurally-valid .bfbs using the library's own reflection::CreateSchema/CreateField builders (id = attacker value) and feeds it to flatbuffers::Parser::Deserialize; a redzone-canary global operator new/delete turns the out-of-bounds write into a deterministic observable.",
+      "marker": "FLATBUFFERS-OOB-CONFIRMED",
+      "demonstrated": "The real reflection parser writes one uoffset_t past the `indexes` heap vector (redzone canary 0xcd->0x00 detected), and with a large attacker id (0xFFFF) the write is ~256 KiB out of bounds and terminates the process with SIGSEGV. The upstream-fixed code rejects the same .bfbs with a bounds error and leaves memory untouched. This is a heap out-of-bounds WRITE (CWE-787) with an attacker-controlled offset (field id * 4, up to ~256 KiB) and a small attacker-influenceable value (the field loop index)."
+    }
+  },
+  "notes": "0-day: the fix 8a12183 (2026-04-02) is not an ancestor of the latest release tag v25.12.19-2026-02-06. Impact is a heap OOB write; full RCE is not demonstrated (needs heap grooming to pivot the limited-value write into control-flow hijack), but the demonstrated effect is deterministic memory corruption + crash in the reflection parser."
+}
