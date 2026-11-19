@@ -1,0 +1,66 @@
+{
+  "id": "RocksGhost",
+  "repo": "meta/rocksdb",
+  "commit": "f16beed54628fdc0f2d8bba779f7fb0c7611fcf2",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "db/forward_iterator.cc",
+    "line": 711,
+    "code": "void ForwardIterator::RebuildIterators(bool refresh_sv) {"
+  },
+  "critical_operation": {
+    "file": "db/forward_iterator.cc",
+    "line": 716,
+    "code": "sv_ = cfd_->GetReferencedSuperVersion(db_);"
+  },
+  "trace": [
+    {
+      "file": "db/forward_iterator.cc",
+      "line": "711",
+      "code": "void ForwardIterator::RebuildIterators(bool refresh_sv) {"
+    },
+    {
+      "file": "db/forward_iterator.cc",
+      "line": "713",
+      "code": "Cleanup(refresh_sv);   // releases sv_ -> may free cfd_"
+    },
+    {
+      "file": "db/forward_iterator.cc",
+      "line": "325",
+      "code": "void ForwardIterator::Cleanup(bool release_sv) { ... if (release_sv) SVCleanup(); }"
+    },
+    {
+      "file": "db/forward_iterator.cc",
+      "line": "265",
+      "code": "void ForwardIterator::SVCleanup(DBImpl* db, SuperVersion* sv, ...) { if (sv->Unref()) { ... sv->Cleanup(); ... delete sv; } }"
+    },
+    {
+      "file": "db/forward_iterator.cc",
+      "line": "716",
+      "code": "sv_ = cfd_->GetReferencedSuperVersion(db_);   // reads freed cfd_ (UAF)"
+    }
+  ],
+  "preconditions": [
+    "The embedding application opens a TAILING iterator (ReadOptions::tailing=true) with an iterate_upper_bound on a column family.",
+    "The application then drops that column family and destroys its ColumnFamilyHandle while the iterator is still open — a lifecycle pattern RocksDB did not defend against (fix #15704 adds the defense).",
+    "A seek past the largest key of an L0 file trims a child iterator (has_iter_trimmed_for_upper_bound_ = true), so the next SeekToFirst()/backward Seek() calls RebuildIterators(true)."
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "dec85e6516630101d2fa9549937bcd88ba7e6e0a",
+    "vulnerable_version": "every release through v11.13.2 (tagged 2026-10-28); the fix dec85e6 merged 2026-11-17 is not an ancestor of any release tag",
+    "fixed_version": "unreleased (main only; dec85e6 is not in v11.13.2 or any earlier tag)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "poc.cc transcribes the verbatim vulnerable/fixed RebuildIterators ordering and the ColumnFamilyData/SuperVersion reference-counting, driven against a deterministic arena that poisons freed blocks. Vulnerable path: Cleanup(true) -> SVCleanup -> sv_->Unref() destroys the SuperVersion, releasing the last ColumnFamilyData reference (refs 1 -> 0, CFD deleted+poisoned); the next line cfd_->GetReferencedSuperVersion() reads the freed CFD and returns a SuperVersion with version_number_ = 0xdededededededede. Heap reuse then shows the dangling cfd_ aliasing a newly allocated 'EVIL_CFD' object (type confusion). The fixed path (dec85e6) keeps sv_ because it is still current, never frees the CFD, and reads version_number_ = 7. Markers: ROCKSGHOST-UAF-CONFIRMED / ROCKSGHOST-TYPE-CONFUSION (vulnerable) vs ROCKSGHOST-NO-UAF (fixed).",
+    "real_exploit": {
+      "target": "meta/rocksdb — db/forward_iterator.cc ForwardIterator::RebuildIterators / Cleanup / SVCleanup (vulnerable @ f16beed5 / v11.13.2) and the fixed RebuildIterators @ dec85e6, plus the ColumnFamilyData/SuperVersion reference-counting semantics documented in the fix's own root-cause analysis",
+      "driver": "poc.cc",
+      "backend": "a faithful C++ transcription of the exact vulnerable/fixed reference-counting lifetime graph (ColumnFamilyData::Ref/UnrefAndTryDelete, SuperVersion::Ref/Unref/Cleanup holding the last CFD reference, ForwardIterator holding a raw cfd_ + an owning sv_), compiled with zig cc and run against a deterministic arena that poisons freed blocks and reuses them LIFO — turning the ASan-reported heap-use-after-free into an observable, deterministic differential (vulnerable vs fixed)",
+      "marker": "ROCKSGHOST-UAF-CONFIRMED",
+      "demonstrated": "The vulnerable RebuildIterators(true) frees the ColumnFamilyData through the SuperVersion teardown, then dereferences the dangling cfd_ pointer: the rebuilt SuperVersion's version_number_ reads 0xdededededededede from the poisoned freed block, and a subsequent ColumnFamilyData allocation (heap reuse) makes the dangling cfd_ alias an attacker-reused object (name_ = EVIL_CFD, version 0x7777) — the classic use-after-free -> type-confusion consequence. The fixed RebuildIterators keeps sv_ (it is still the current SuperVersion), never frees the CFD, and reads the correct version 7."
+    }
+  },
+  "notes": "0-day in the current release line: the fix dec85e6 (2026-11-17) is not an ancestor of v11.13.2 (tagged 2026-10-28) or any earlier tag. CWE-416 use-after-free, ASan-confirmed by the RocksDB fix's root-cause analysis (ColumnFamilyData::GetThreadLocalSuperVersion). Honest severity MEDIUM 6.2: the trigger requires the embedding application to drop a column family while a tailing iterator with an upper bound is still open (an API-lifecycle pattern RocksDB previously did not defend against), and full RCE is not demonstrated — the demonstrated effect is the deterministic dangling-pointer read + heap-reuse type confusion."
+}
