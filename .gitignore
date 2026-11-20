@@ -64,3 +64,11 @@ FdbWormhole/exploit
 
 # DialRabbit compiled binary (rebuilt by run.sh)
 DialRabbit/redos
+
+# redis-overrun + nltk runtime artifacts
+tmp-vuln/
+tmp-fixed/
+nodes.conf
+redis.log
+evil.jar
+marker.txt

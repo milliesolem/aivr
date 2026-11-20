@@ -1,0 +1,54 @@
+{
+  "id": "RedisOverrun",
+  "repo": "redis/redis",
+  "commit": "1a2574ce1551d3de6e0b4a56756c0fdbc6659e4f",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/cluster_legacy.c",
+    "line": 2854,
+    "code": "explen += (sizeof(clusterMsgDataGossip)*count);"
+  },
+  "critical_operation": {
+    "file": "src/cluster_legacy.c",
+    "line": 2861,
+    "code": "uint16_t extlen = getPingExtLength(ext);"
+  },
+  "trace": [
+    {
+      "file": "src/cluster_legacy.c",
+      "line": "2848-2854",
+      "code": "uint16_t count = ntohs(hdr->count); explen = sizeof(clusterMsg)-sizeof(union clusterMsgData); explen += (sizeof(clusterMsgDataGossip)*count);  // NO check that explen <= totlen"
+    },
+    {
+      "file": "src/cluster_legacy.c",
+      "line": "2858-2859",
+      "code": "if (hdr->mflags[0] & CLUSTERMSG_FLAG0_EXT_DATA) { clusterMsgPingExt *ext = getInitialPingExt(hdr, count);  // ext = hdr + explen"
+    },
+    {
+      "file": "src/cluster_legacy.c",
+      "line": "2861",
+      "code": "uint16_t extlen = getPingExtLength(ext);  // OOB read at hdr + 104*count, past the received packet"
+    }
+  ],
+  "preconditions": [
+    "Redis Cluster node running a stable release (8.10.3 and earlier; the fix 9a5c6e9 has not been backported)",
+    "Attacker can open a TCP connection to the cluster-bus port (base port + 10000), which is unauthenticated (the cluster bus has no auth; the unstable branch even added cluster-bus-port-protected-mode to warn of this)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "9a5c6e97884e",
+    "vulnerable_version": "Redis 8.10.3 (latest stable) and all earlier stable releases",
+    "fixed_version": "unstable only (9a5c6e9, redis#16104, 2026-10-28); no stable release ships it",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "The REAL redis-server is built from source at 8.10.3 (vulnerable) and 9a5c6e9 (fixed) and started in cluster mode. A crafted MEET packet (gossip count=65535, totlen=2256) sent to the cluster-bus port (port+10000) makes the vulnerable server read getPingExtLength() at hdr + 104*65535 (~6.8MB past the ~4KB receive buffer) and die with SIGSEGV (rc=-11). The fixed server logs 'Received invalid meet packet with gossip count 65535 that exceeds total packet length (2256)' and keeps serving (PONG).",
+    "real_exploit": {
+      "target": "Redis Cluster 8.10.3 (latest stable) — the actual redis-server binary built from source, running in cluster mode",
+      "driver": "exploit.py",
+      "backend": "the real src/cluster_legacy.c::clusterProcessPacket() parser in a live redis-server process (built via make MALLOC=libc with the musl toolchain)",
+      "marker": "OOB-READ-CONFIRMED",
+      "demonstrated": "A single crafted cluster-bus MEET packet (16-bit gossip count set to 65535, FLAG0_EXT_DATA set) causes the vulnerable 8.10.3 redis-server to SIGSEGV (observed rc=-11, signal 11) — a remote unauthenticated crash of a Redis Cluster node. The same packet against the fixed build (9a5c6e9) is rejected with a length warning and the server survives. Differential is attributable purely to the missing 'totlen < explen' bounds check."
+    }
+  }
+}
