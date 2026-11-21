@@ -1,0 +1,64 @@
+{
+  "id": "ArrowWrap",
+  "verdict": "confirmed",
+  "repo": "apache/arrow",
+  "commit": "8edc833eef5ac1844da6ad0aebec4bb4d8032350",
+  "entry_point": {
+    "file": "cpp/src/arrow/json/parser.cc",
+    "line": 202,
+    "code": "Status AppendNull(int64_t count) {\n    RETURN_NOT_OK(data_builder_.Append(count, false));\n    return null_bitmap_builder_.Append(count, false);\n  }"
+  },
+  "critical_operation": {
+    "file": "cpp/src/arrow/buffer_builder.h",
+    "line": 94,
+    "code": "auto min_capacity = size_ + additional_bytes;"
+  },
+  "trace": [
+    {
+      "file": "cpp/src/arrow/json/parser.cc",
+      "line": "202-204",
+      "code": "Status AppendNull(int64_t count) { RETURN_NOT_OK(data_builder_.Append(count, false)); ... }  // count derived from parsed JSON"
+    },
+    {
+      "file": "cpp/src/arrow/buffer_builder.h",
+      "line": "358-362",
+      "code": "Status Append(const int64_t num_copies, bool value) { ARROW_RETURN_NOT_OK(Reserve(num_copies)); UnsafeAppend(num_copies, value); return Status::OK(); }"
+    },
+    {
+      "file": "cpp/src/arrow/buffer_builder.h",
+      "line": "431-434",
+      "code": "Status Reserve(const int64_t additional_elements) { return Resize(BufferBuilder::GrowByFactor(bit_length_, bit_length_ + additional_elements), false); }"
+    },
+    {
+      "file": "cpp/src/arrow/buffer_builder.h",
+      "line": "94",
+      "code": "auto min_capacity = size_ + additional_bytes;  // signed int64 overflow -> wraps negative -> Reserve returns OK without growing"
+    },
+    {
+      "file": "cpp/src/arrow/buffer_builder.h",
+      "line": "151-153",
+      "code": "void UnsafeAppend(const int64_t num_copies, uint8_t value) { memset(data_ + size_, value, static_cast<size_t>(num_copies)); size_ += num_copies; }"
+    }
+  ],
+  "preconditions": [
+    "unauthenticated (parsing untrusted JSON/IPC input)",
+    "attacker influences a size/length/count used by BufferBuilder/TypedBufferBuilder to a value that overflows int64 (e.g. a declared count near INT64_MAX in the IPC JSON integration format, or a huge offset computation)"
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "16900e3b0f3867f0fefe0e70e769516644d07902",
+    "vulnerable_version": "apache-arrow-26.0.1 (and earlier)",
+    "fixed_version": "unreleased trunk (post 26.0.1, commit 16900e3 / PR #49883)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Vulnerable build (unmodified apache-arrow-26.0.1 buffer_builder.h): Reserve(INT64_MAX) returns OK (integer overflow), then Append(INT64_MAX, 0x41) performs memset of 9.2e18 bytes past a 64-byte heap buffer -> SIGSEGV (exit 139). Fixed build (commit 16900e3): Reserve returns CapacityError, no write, clean exit 0.",
+    "real_exploit": {
+      "target": "Apache Arrow C++ BufferBuilder / TypedBufferBuilder (unmodified header from apache-arrow-26.0.1)",
+      "driver": "exploit.cc",
+      "backend": "the real Arrow BufferBuilder class, compiled verbatim from buffer_builder.h against a minimal faithful Arrow support layer (malloc-backed ResizableBuffer)",
+      "marker": "OVERFLOW-CONFIRMED",
+      "demonstrated": "out-of-bounds write: the vulnerable Reserve(INT64_MAX) silently returns OK (size_ + additional_bytes wraps negative), then UnsafeAppend's memset writes INT64_MAX bytes past a 64-byte heap buffer and the process dies with SIGSEGV; the fixed build rejects the same call with CapacityError"
+    }
+  }
+}
