@@ -1,0 +1,66 @@
+{
+  "id": "GrpcGhost",
+  "repo": "grpc/grpc",
+  "commit": "ee6c934222c4ad96bbec18845c4d8e8762983189",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "src/core/handshaker/security/secure_endpoint.cc",
+    "line": 1350,
+    "code": "grpc_core::FrameProtector frame_protector_;"
+  },
+  "critical_operation": {
+    "file": "src/core/handshaker/security/secure_endpoint.cc",
+    "line": 179,
+    "code": "self->read_mu_.Lock();"
+  },
+  "trace": [
+    {
+      "file": "src/core/handshaker/security/secure_endpoint.cc",
+      "line": "83",
+      "code": "class FrameProtector : public RefCounted<FrameProtector> {"
+    },
+    {
+      "file": "src/core/handshaker/security/secure_endpoint.cc",
+      "line": "168-172",
+      "code": "void MaybePostReclaimer() { ... memory_owner_.PostReclaimer(ReclamationPass::kBenign, [self = Ref()](std::optional<ReclamationSweep> sweep) {"
+    },
+    {
+      "file": "src/core/handshaker/security/secure_endpoint.cc",
+      "line": "572-574",
+      "code": "void Shutdown() { shutdown_ = true; memory_owner_.Reset(); }"
+    },
+    {
+      "file": "src/core/handshaker/security/secure_endpoint.cc",
+      "line": "1350",
+      "code": "grpc_core::FrameProtector frame_protector_;  // EMBEDDED BY VALUE inside Impl"
+    },
+    {
+      "file": "src/core/handshaker/security/secure_endpoint.cc",
+      "line": "179",
+      "code": "self->read_mu_.Lock();  // reclaimer callback dereferences the freed FrameProtector (UAF)"
+    }
+  ],
+  "preconditions": [
+    "The gRPC server uses TLS (SecureEndpoint) with ResourceQuota/memory-owner accounting enabled (the default for secure endpoints).",
+    "A benign ResourceQuota memory-reclamation sweep is triggered (memory pressure) and pops the reclaimer handle right before the connection's Shutdown() calls memory_owner_.Reset() — a race window.",
+    "The owning SecureEndpoint::Impl is destroyed while the reclaimer callback (which captured [self = Ref()]) is still in flight.",
+    "In the vulnerable code, ~Impl() destroys frame_protector_ IN PLACE without decrementing the refcount, so the in-flight callback's Ref() points at freed memory."
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "7f3d97784206d35acd025cb861bf5f84f7bf2226",
+    "vulnerable_version": "every release through v1.85.4 (tagged 2026-11-21, commit ee6c9342); the fix 7f3d9778 merged 2026-11-17 is NOT an ancestor of v1.85.4",
+    "fixed_version": "unreleased (main only; 7f3d9778 not in v1.85.4 or any earlier tag)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "poc.cc transcribes the verbatim vulnerable/fixed lifetime graph (RefCounted vs InternallyRefCounted, OrphanablePtr, ReclaimerQueue::Handle::Orphan, MemoryOwner::Reset) and drives it against a deterministic bump arena that poisons freed blocks with 0xDE. Vulnerable path: the sweep pops the reclaimer handle, Shutdown() -> memory_owner_.Reset() cannot cancel it, ~Impl() destroys frame_protector_ IN PLACE (refcount stays 2), the Impl block is freed+poisoned, and the in-flight callback's self->read_mu_.Lock() reads 0xDEDEDEDEDEDEDEDE instead of the 0x47525043 GRPC magic -> GRPCGHOST-UAF-CONFIRMED. Fixed path: ~Impl() -> OrphanablePtr -> FrameProtector::Orphan() -> Unref() (refcount 2 -> 1) keeps the object alive on the heap, the callback reads the intact magic (GRPCGHOST-FIXED-NO-UAF), and its Ref() is the last reference so the FrameProtector is freed exactly once after the callback completes (GRPCGHOST-FIXED-CLEANUP).",
+    "real_exploit": {
+      "target": "grpc/grpc — src/core/handshaker/security/secure_endpoint.cc FrameProtector (RefCounted<FrameProtector>, embedded by value @ v1.85.4 ee6c9342) with MaybePostReclaimer/Shutdown, and the fixed InternallyRefCounted + OrphanablePtr<FrameProtector> @ 7f3d9778",
+      "driver": "poc.cc",
+      "backend": "a faithful C++ transcription of the exact vulnerable/fixed lifetime graph (RefCounted vs InternallyRefCounted, OrphanablePtr::Orphan->Unref, ReclaimerQueue::Handle::Orphan cancelling only a still-queued callback, MemoryOwner::Reset), compiled with zig c++ and run against a deterministic arena that poisons freed blocks (0xDE) — turning the ASan-reported heap-use-after-free into an observable, deterministic vulnerable-vs-fixed differential",
+      "marker": "GRPCGHOST-UAF-CONFIRMED",
+      "demonstrated": "On the vulnerable path the reclaimer callback dereferences a freed FrameProtector: self->read_mu_.Lock() observes the poison 0xDEDEDEDEDEDEDEDE where the GRPC magic 0x47525043 should be, proving the [self = Ref()] captured pointer outlived its (in-place destroyed) object. On the fixed path the OrphanablePtr/Orphan->Unref keeps the object alive until the callback's Ref() drops, no poison is observed, and the FrameProtector is freed exactly once."
+    }
+  }
+}
