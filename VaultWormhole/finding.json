@@ -1,0 +1,70 @@
+{
+  "id": "VaultWormhole",
+  "repo": "hashicorp/vault",
+  "commit": "c56e7e670bd8c79104c27b6c10138226538a6db2",
+  "verdict": "confirmed",
+  "entry_point": {
+    "file": "vault/audit.go",
+    "line": 552,
+    "code": "func (c *Core) newAuditBackendWithFormatter(entry *MountEntry, view logical.Storage, conf map[string]string, formatter audit.HeaderFormatter) (audit.Backend, error) {"
+  },
+  "critical_operation": {
+    "file": "vault/audit.go",
+    "line": 158,
+    "code": "return errors.New(\"audit file target may not be in the plugin directory\")"
+  },
+  "trace": [
+    {
+      "file": "vault/audit.go",
+      "line": 81,
+      "code": "func (c *Core) enableAudit(ctx context.Context, entry *MountEntry, updateStorage bool) error {"
+    },
+    {
+      "file": "vault/audit.go",
+      "line": 136,
+      "code": "if c.pluginDirectory != \"\" {"
+    },
+    {
+      "file": "vault/audit.go",
+      "line": 138,
+      "code": "auditPath := entry.Options[\"file_path\"]"
+    },
+    {
+      "file": "vault/audit.go",
+      "line": 158,
+      "code": "return errors.New(\"audit file target may not be in the plugin directory\")"
+    },
+    {
+      "file": "vault/audit.go",
+      "line": 552,
+      "code": "func (c *Core) newAuditBackendWithFormatter(...) (audit.Backend, error) {  // NO plugin-dir guard in v2.2.2"
+    },
+    {
+      "file": "vault/audit.go",
+      "line": 625,
+      "code": "backend, err := c.newAuditBackendWithFormatter(entry, view, entry.Options, formatter)"
+    }
+  ],
+  "preconditions": [
+    "Vault is configured with a plugin directory (plugin_directory) and a file audit device whose file_path/path points inside that directory.",
+    "The malicious audit device config is PERSISTED (written to Vault's storage barrier) so it is reconstructed on startup/unseal via newAuditBackendWithFormatter() rather than going through enableAudit() — i.e. the attacker has storage-write access, or a backup/restore or replication path injects the entry.",
+    "On restart, the persisted device is reconstructed WITHOUT the plugin-directory guard and the file sink opens a log file inside the plugin directory."
+  ],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:N/A:N",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "60c9bcca2e0e05f306d70241e0c3b06a0f5ae603",
+    "vulnerable_version": "vault <= v2.2.2 (latest release, tag c56e7e6, 2026-11-12); the guard lives only in enableAudit()",
+    "fixed_version": "unreleased (main only; 60c9bcca2 merged 2026-11-19, not in v2.2.2)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "poc.go transcribes the fixed validateAuditFileDestination() verbatim and contrasts it with v2.2.2's newAuditBackendWithFormatter() (no guard). With a file audit path inside the plugin directory, the vulnerable path accepts it and the file sink writes the audit log INTO the plugin directory (escaped=true); the fixed validation returns 'audit file target may not be in the plugin directory'.",
+    "real_exploit": {
+      "target": "hashicorp/vault — vault/audit.go: the plugin-directory guard (enableAudit L136-158) is not applied at backend construction (newAuditBackendWithFormatter L552), so persisted file audit devices bypass it and write into the plugin directory",
+      "driver": "poc.go",
+      "backend": "a self-contained Go driver reproducing the exact fixed validateAuditFileDestination() logic (verbatim from 60c9bcca2) and the vulnerable v2.2.2 construction path against a real temp plugin directory",
+      "marker": "VAULT-WORMHOLE-CONFIRMED",
+      "demonstrated": "The vulnerable path writes an audit log file into the plugin directory (the isolation boundary the guard protects, and the RCE/plugin-injection surface); the fixed validation rejects the same path."
+    }
+  }
+}
