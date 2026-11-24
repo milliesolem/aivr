@@ -1,0 +1,31 @@
+{
+  "id": "NomadHiccup",
+  "verdict": "confirmed",
+  "repo": "hashicorp/nomad",
+  "commit": "3e48ce44034cfaaf7b18103abe5ffb46b2a6ccce",
+  "entry_point": {"file": "client/allocdir/alloc_dir.go", "line": 259, "code": "if err := filepath.Walk(path, walkFn); err != nil {"},
+  "critical_operation": {"file": "client/allocdir/alloc_dir.go", "line": 244, "code": "file, err := os.Open(path)"},
+  "trace": [
+    {"file": "client/allocdir/alloc_dir.go", "line": "210", "code": "walkFn := func(path string, fileInfo os.FileInfo, err error) error { // fileInfo from walk-time Lstat"},
+    {"file": "client/allocdir/alloc_dir.go", "line": "239", "code": "if fileInfo.IsDir() || (fileInfo.Mode()&os.ModeSymlink != 0) { return nil } // only the Lstat view gates this"},
+    {"file": "client/allocdir/alloc_dir.go", "line": "244-248", "code": "os.Open(path) follows a symlink swapped in after Lstat; io.Copy(tw, file) archives the outside-sandbox file into the migration stream"}
+  ],
+  "preconditions": ["a malicious task running in an allocation on the client", "the alloc is snapshotted while still running (alloc migration / alloc watcher)", "attacker wins the TOCTOU window between Walk's Lstat and Snapshot's os.Open"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:C/C:H/I:N/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "81504bce76b2b61e913ab711cb5836d7936903b8",
+    "vulnerable_version": "nomad client <= current release (unreleased fix on main)",
+    "fixed_version": "main @ 81504bce76 (os.OpenRoot path jail)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "The ported vulnerable Snapshot walkFn archives the HOST secret's contents (symlink swapped in after Lstat) into the tar; the fixed os.OpenRoot path refuses the escaping symlink ('path escapes from parent') and leaks nothing.",
+    "real_exploit": {
+      "target": "hashicorp/nomad client/allocdir/alloc_dir.go AllocDir.Snapshot TOCTOU symlink follow",
+      "driver": "poc.go",
+      "backend": "verbatim port of the pre-fix and post-fix walkFn bodies run against a real staged filesystem (real os.Open symlink-follow vs real Go 1.24 os.OpenRoot path jail)",
+      "marker": "ESCAPE CONFIRMED",
+      "demonstrated": "a still-running task swaps a regular file for a symlink to a host file after Walk's Lstat; Snapshot follows it and exfiltrates the outside-sandbox secret via the alloc-migration archive"
+    }
+  }
+}
