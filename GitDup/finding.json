@@ -1,0 +1,32 @@
+{
+  "id": "GitDup",
+  "verdict": "confirmed",
+  "repo": "git/git",
+  "commit": "b20f82b0fbcf3a5e77bb7efe5b16be4d5e0eefea",
+  "entry_point": {"file": "ref-filter.c", "line": 2344, "code": "static int get_object(struct ref_array_item *ref, int deref,"},
+  "critical_operation": {"file": "ref-filter.c", "line": 2380, "code": "free(oi->content);"},
+  "trace": [
+    {"file": "ref-filter.c", "line": "2351", "code": "oi->maybe_object = NULL;"},
+    {"file": "ref-filter.c", "line": "2352", "code": "oi->content = NULL;"},
+    {"file": "ref-filter.c", "line": "2364", "code": "goto out;"},
+    {"file": "ref-filter.c", "line": "2380", "code": "free(oi->content);"}
+  ],
+  "preconditions": ["a ref whose object is missing (repo corruption, partial/promisor clone, interrupted fetch, or crafted ref)", "processed after a ref whose content was read and freed (e.g. an annotated tag) in the same ref-filter run", "a content-reading format atom such as %(*objectname)"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "b20f82b0fbcf3a5e77bb7efe5b16be4d5e0eefea",
+    "vulnerable_version": "git through v2.56.1 (latest release; regression from a29e2e8fe, 2025-10-23)",
+    "fixed_version": "unreleased (master branch mb/ref-filter-missing-object-double-free)",
+    "proof_commands": ["bash build.sh", "./poc", "./poc fixed"],
+    "observed_result": "The faithful get_object() port reproduces glibc 'free(): double free detected in tcache 2' / Aborted (exit 134) on the missing-object-after-tag sequence; the one-line fix (oi->content = NULL) makes it survive (exit 0).",
+    "real_exploit": {
+      "target": "git/git ref-filter.c get_object() double free of reused expand_data->content",
+      "driver": "poc.c",
+      "backend": "verbatim-control-flow C port of git v2.56.1 get_object() built with zig cc (glibc), real double-free detector",
+      "marker": "double free detected in tcache",
+      "demonstrated": "git for-each-ref --format='%(*objectname)' over an annotated tag followed by a ref with a missing object double-frees oi->content and aborts the git process"
+    }
+  }
+}
