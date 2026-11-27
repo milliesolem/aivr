@@ -1,0 +1,31 @@
+{
+  "id": "LevelOverrun",
+  "verdict": "confirmed",
+  "repo": "google/leveldb",
+  "commit": "bb74ef739973a70ca9f0d90788a1da89b788c0ad",
+  "entry_point": {"file": "table/block.cc", "line": 55, "code": "static inline const char* DecodeEntry(const char* p, const char* limit,"},
+  "critical_operation": {"file": "table/block.cc", "line": 71, "code": "if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {"},
+  "trace": [
+    {"file": "table/block.cc", "line": "61-67", "code": "non_shared and value_length are uint32_t varints read from the attacker-controlled block"},
+    {"file": "table/block.cc", "line": "71", "code": "the bounds check sums (*non_shared + *value_length) in uint32_t -> wraps; non_shared=1, value_length=0xffffffff -> sum=0 -> check passes"},
+    {"file": "table/block.cc", "line": "73", "code": "DecodeEntry returns p (accepts); Block::Iter::ParseNextKey builds value_ = Slice(p+non_shared, value_length) extending ~4 GiB past the buffer -> out-of-bounds read"}
+  ],
+  "preconditions": ["the attacker supplies or corrupts a leveldb table/block (e.g. an .ldb file, synced/imported database, or on-disk corruption)", "the application iterates the block (normal read path)"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:H",
+  "reachable_if_trusted_input": false,
+  "evidence": {
+    "fixed_commit": "29465588d3dfdc80fba5e198037582b8fdb5dd60",
+    "vulnerable_version": "google/leveldb <= 1.23 (latest release) and all commits before 29465588d3 (fix merged 2026-11-04, UNRELEASED)",
+    "fixed_version": "unreleased (fix commit 29465588d3; latest tagged release 1.23 is still vulnerable)",
+    "proof_commands": ["sh run.sh"],
+    "observed_result": "The REAL leveldb Block iterator (vendored upstream table/block.cc compiled vuln vs fixed) on the upstream test's crafted block: VULNERABLE accepts the entry (Valid=1), returns a value Slice of size 0xffffffff ending 4294967287 bytes past the 16-byte buffer, and reading it SIGSEGVs (out-of-bounds read confirmed). FIXED rejects it (Valid=0, status.IsCorruption=1).",
+    "real_exploit": {
+      "target": "google/leveldb table/block.cc DecodeEntry integer overflow -> out-of-bounds read",
+      "driver": "poc.cc",
+      "backend": "real vendored upstream leveldb Block/DecodeEntry (fixed 29465588d3) vs the reverted vulnerable DecodeEntry, compiled with zig cc; crafted block = leveldb's own CorruptedBlockEntryLengthOverflow regression test input",
+      "marker": "OUT-OF-BOUNDS READ confirmed. PWNED.",
+      "demonstrated": "a crafted leveldb block makes the vulnerable DecodeEntry pass its overflowing bounds check so the iterator over-reads ~4 GiB past the buffer (SIGSEGV); the fix rejects the entry as corruption"
+    }
+  }
+}
