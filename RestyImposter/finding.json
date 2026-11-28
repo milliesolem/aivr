@@ -1,0 +1,32 @@
+{
+  "id": "RestyImposter",
+  "verdict": "confirmed",
+  "repo": "openresty/lua-nginx-module",
+  "commit": "c686ddb6f29a81754509cec7ace36e1a7c8c51e4",
+  "entry_point": {"file": "src/ngx_http_lua_ssl_ocsp.c", "line": 350, "code": "    if (OCSP_basic_verify(basic, chain, NULL, OCSP_NOVERIFY) != 1) {"},
+  "critical_operation": {"file": "src/ngx_http_lua_ssl_ocsp.c", "line": 350, "code": "    if (OCSP_basic_verify(basic, chain, NULL, OCSP_NOVERIFY) != 1) {"},
+  "trace": [
+    {"file": "attacker", "line": "-", "code": "attacker supplies an OCSP response (MITM on a stapled/relayed OCSP channel) asserting status GOOD for a revoked/target cert, signed by a throw-away self-signed cert embedded in the response"},
+    {"file": "src/ngx_http_lua_ssl_ocsp.c", "line": "350", "code": "ngx_http_lua_ffi_ssl_validate_ocsp_response calls OCSP_basic_verify(basic, chain, NULL, OCSP_NOVERIFY): store=NULL + OCSP_NOVERIFY skip ocsp_verify_signer -> the responder cert's chain and OCSP-signing authorization are NOT checked"},
+    {"file": "openssl/crypto/ocsp/ocsp_vfy.c", "line": "-", "code": "OCSP_basic_verify verifies only the signature against the embedded (attacker) cert and returns 1; the unauthorized responder is accepted"},
+    {"file": "ngx.ocsp.validate_ocsp_response", "line": "-", "code": "the Lua caller receives a 'valid' verdict for a certificate whose real OCSP status is revoked -> certificate-revocation bypass"}
+  ],
+  "preconditions": ["an OpenResty/lua-nginx-module app validates OCSP responses via ngx.ocsp.validate_ocsp_response from a source an attacker can influence (MITM on a stapled/relayed OCSP response)", "attacker holds/targets a certificate whose real OCSP status is not GOOD"],
+  "severity_claim": "medium",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+  "reachable_if_trusted_input": true,
+  "evidence": {
+    "fixed_commit": "9c61e3da0064c27144acde07f5b6db83bbde28a1",
+    "vulnerable_version": "lua-nginx-module with OCSP support, through master @ c686ddb6 (fix 9c61e3da committed 2026-11-28, unreleased; latest tag v0.10.31)",
+    "fixed_version": "none released yet (fix on master 9c61e3da0064)",
+    "proof_commands": ["bash run.sh"],
+    "observed_result": "Against the system OpenSSL 3.5.9 (the libcrypto lua-nginx-module links): an OCSP response forged to say GOOD for 'victim.example.com' and signed by an unauthorized self-signed 'attacker-responder' cert is ACCEPTED by the verbatim vulnerable verify (OCSP_basic_verify(basic, chain, NULL, OCSP_NOVERIFY)) and REJECTED by the upstream fix (store={issuer}+PARTIAL_CHAIN, flags 0 -> responder not authorized).",
+    "real_exploit": {
+      "target": "openresty/lua-nginx-module OCSP signer-authorization bypass (CWE-295/CWE-345)",
+      "driver": "poc.c",
+      "backend": "the REAL OpenSSL 3.5.9 OCSP verification stack (same libcrypto lua-nginx-module uses); the verbatim vulnerable vs fixed OCSP_basic_verify calls drive a genuinely forged, attacker-signed OCSP response",
+      "marker": "OCSP SIGNER AUTHORIZATION BYPASS CONFIRMED",
+      "demonstrated": "a forged GOOD OCSP response signed by an unauthorized self-signed cert is accepted by the vulnerable code (revocation bypass) and rejected by the fix"
+    }
+  }
+}
